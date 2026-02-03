@@ -1,0 +1,417 @@
+{
+    "name": "Query:",
+    "type": 8,
+    "data": [
+        null,
+        null
+    ],
+    "children": [
+        {
+            "name": "Photos only",
+            "type": 6,
+            "criteria": "sort=2,videos=0",
+            "columns": "name,datecapt,aperture,speed,iso,focal",
+            "children": []
+        },
+        {
+            "name": "Photos GPS and locations",
+            "type": 6,
+            "criteria": "videos=0,hasgps",
+            "columns": "name,datecapt,latitude,longitude,country,state,city,location",
+            "children": []
+        },
+        {
+            "name": "Videos only",
+            "type": 6,
+            "criteria": "sort=2,videos=1",
+            "columns": "name,datecapt,duration",
+            "children": []
+        },
+        {
+            "name": "Statistics and Counts",
+            "type": 7,
+            "data": [
+                "None",
+                "None"
+            ],
+            "children": [
+                {
+                    "name": "Lens used by Camera",
+                    "type": 6,
+                    "criteria": "videos=0,distinct,sort=-1",
+                    "columns": "camera,lens",
+                    "children": []
+                },
+                {
+                    "name": "Creators list",
+                    "type": 6,
+                    "criteria": "videos=0,distinct,sort=-1",
+                    "columns": "creator",
+                    "children": []
+                },
+                {
+                    "name": "Copyrights list",
+                    "type": 6,
+                    "criteria": "videos=0,distinct,sort=-1",
+                    "columns": "copyright",
+                    "children": []
+                },
+                {
+                    "name": "Cameras list",
+                    "type": 6,
+                    "criteria": "videos=0,distinct,sort=-1",
+                    "columns": "camera",
+                    "children": []
+                },
+                {
+                    "name": "Photos by Modification Date",
+                    "type": 6,
+                    "criteria": "sort=2,videos=0",
+                    "columns": "datemod,countby(datemod)",
+                    "children": []
+                },
+                {
+                    "name": "Photos by Creator",
+                    "type": 6,
+                    "criteria": "sort=2,videos=0",
+                    "columns": "creator,countby(creator)",
+                    "children": []
+                },
+                {
+                    "name": "Photos by Copyright",
+                    "type": 6,
+                    "criteria": "sort=2,videos=0",
+                    "columns": "copyright,countby(copyright)",
+                    "children": []
+                },
+                {
+                    "name": "Photos by Camera",
+                    "type": 6,
+                    "criteria": "sort=2,videos=0",
+                    "columns": "camera, countby(camera)",
+                    "children": []
+                },
+                {
+                    "name": "Photos by Lens",
+                    "type": 6,
+                    "criteria": "sort=2,videos=0",
+                    "columns": "lens,countby(lens)",
+                    "children": []
+                },
+                {
+                    "name": "Photos by Country",
+                    "type": 6,
+                    "criteria": "sort=2,videos=0",
+                    "columns": "country,countby(country)",
+                    "children": []
+                },
+                {
+                    "name": "Photos by State",
+                    "type": 6,
+                    "criteria": "sort=2,videos=0",
+                    "columns": "state,countby(state)",
+                    "children": []
+                },
+                {
+                    "name": "GPS use",
+                    "type": 6,
+                    "criteria": "sort=1",
+                    "columns": "hasgps,countby(hasgps)",
+                    "children": []
+                },
+                {
+                    "name": "Flash use",
+                    "type": 6,
+                    "criteria": "sort=1",
+                    "columns": "flash,countby(flash)",
+                    "children": []
+                },
+                {
+                    "name": "Photos by Lens on Nikon Cameras",
+                    "type": 6,
+                    "criteria": "camera=nikon%, distinct, sort=4",
+                    "columns": "camera, camerasn,lens, countby(lens)",
+                    "children": []
+                },
+                {
+                    "name": "Pure monochrome use",
+                    "type": 6,
+                    "criteria": "sort=1",
+                    "columns": "monochrome,countby(monochrome)",
+                    "children": []
+                },
+                {
+                    "name": "Photos by Modifcations number",
+                    "type": 6,
+                    "criteria": "sort=2",
+                    "columns": "modcount,countby(modcount)",
+                    "children": []
+                },
+                {
+                    "name": "Virtual Copies number by Master Photo",
+                    "type": 6,
+                    "criteria": "sort=2,videos=0,vcopies=!null",
+                    "columns": "master,countby(master)",
+                    "children": []
+                }
+            ]
+        },
+        {
+            "name": "Default Collection",
+            "type": 7,
+            "data": [
+                "None",
+                "None"
+            ],
+            "children": [
+                {
+                    "name": "videos details",
+                    "type": 6,
+                    "criteria": "sort=1,videos=1",
+                    "columns": "name=full,datecapt,duration,dims,camera,lens",
+                    "children": []
+                },
+                {
+                    "name": "By Century",
+                    "type": 7,
+                    "data": [
+                        "None",
+                        "None"
+                    ],
+                    "children": [
+                        {
+                            "name": "Century 21",
+                            "type": 6,
+                            "criteria": "sort=-2,videos=0,datecapt=>=2000",
+                            "columns": "name,datecapt,iso,focal,aperture,speed,rating,camera,lens",
+                            "children": []
+                        },
+                        {
+                            "name": "Century 20",
+                            "type": 6,
+                            "criteria": "sort=-2,videos=0,datecapt=>=1900,datecapt=<2000",
+                            "columns": "name,datecapt,iso,focal,aperture,speed,rating,camera,lens",
+                            "children": []
+                        }
+                    ]
+                },
+                {
+                    "name": "By Year",
+                    "type": 7,
+                    "data": [
+                        "",
+                        ""
+                    ],
+                    "children": [
+                        {
+                            "name": "Photos 2016",
+                            "type": 6,
+                            "criteria": "sort=-2,videos=0,datecapt=>2016-01-01,datecapt=<=2016-12-31",
+                            "columns": "name,datecapt,iso,focal,aperture,speed,rating,camera,lens",
+                            "children": []
+                        },
+                        {
+                            "name": "Photos 2017",
+                            "type": 6,
+                            "criteria": "sort=-2,videos=0,datecapt=>2017-01-01,datecapt=<=2017-12-31",
+                            "columns": "name,datecapt,iso,focal,aperture,speed,rating,camera,lens",
+                            "children": []
+                        },
+                        {
+                            "name": "Photos 2018",
+                            "type": 6,
+                            "criteria": "sort=-2,videos=0,datecapt=>2018-01-01,datecapt=<=2018-12-31",
+                            "columns": "name,datecapt,iso,focal,aperture,speed,rating,camera,lens,keywords",
+                            "children": []
+                        },
+                        {
+                            "name": "Photos 2019",
+                            "type": 6,
+                            "criteria": "sort=-2,videos=0,datecapt=>2019-01-01,datecapt=<=2019-12-31",
+                            "columns": "name,datecapt,iso,focal,aperture,speed,rating,camera,lens",
+                            "children": []
+                        }
+                    ]
+                },
+                {
+                    "name": "Classique",
+                    "type": 6,
+                    "criteria": "sort=2,videos=0",
+                    "columns": "name,datecapt,iso,focal,aperture,speed,rating,camera,lens",
+                    "children": []
+                },
+                {
+                    "name": "Photos adresses",
+                    "type": 6,
+                    "criteria": "sort=location,videos=0",
+                    "columns": "name,datecapt,location,city,country,state",
+                    "children": []
+                },
+                {
+                    "name": "Duplicate Video names",
+                    "type": 6,
+                    "criteria": "count=name>1,videos=1,sort=2",
+                    "columns": "name=basext_vc,countby(name=basext_vc)",
+                    "children": []
+                },
+                {
+                    "name": "Duplicate Photo names",
+                    "type": 6,
+                    "criteria": "count=name>1,videos=0,sort=-2",
+                    "columns": "name=basext_vc, countby(name=basext_vc)",
+                    "children": []
+                },
+                {
+                    "name": "Virtual Copies",
+                    "type": 6,
+                    "criteria": "vcopies=true",
+                    "columns": "name=full_vc,master,datecapt,datemod",
+                    "children": []
+                },
+                {
+                    "name": "By Rating",
+                    "type": 7,
+                    "data": null,
+                    "children": [
+                        {
+                            "name": "1 Star",
+                            "type": 6,
+                            "criteria": "sort=2,videos=0,rating==1",
+                            "columns": "id,name,datecapt,iso,focal,aperture,speed,rating,camera,lens",
+                            "children": []
+                        },
+                        {
+                            "name": "2 Stars",
+                            "type": 6,
+                            "criteria": "sort=2,videos=0,rating==2",
+                            "columns": "id,name,datecapt,iso,focal,aperture,speed,rating,camera,lens",
+                            "children": []
+                        },
+                        {
+                            "name": "3 Stars",
+                            "type": 6,
+                            "criteria": "sort=2,videos=0,rating==3",
+                            "columns": "id,name,datecapt,iso,focal,aperture,speed,rating,camera,lens",
+                            "children": []
+                        },
+                        {
+                            "name": "4 Stars",
+                            "type": 6,
+                            "criteria": "sort=2,videos=0,rating==4",
+                            "columns": "id,name,datecapt,iso,focal,aperture,speed,rating,camera,lens",
+                            "children": []
+                        },
+                        {
+                            "name": "5 Stars",
+                            "type": 6,
+                            "criteria": "sort=2,videos=0,rating==5",
+                            "columns": "id,name,datecapt,iso,focal,aperture,speed,rating,camera,lens",
+                            "children": []
+                        }
+                    ]
+                },
+                {
+                    "name": "Photos Geolocalized",
+                    "type": 6,
+                    "criteria": "sort=2,videos=0,hasgps",
+                    "columns": "name,datecapt",
+                    "children": []
+                }
+            ]
+        },
+        {
+            "name": "Virtual copies",
+            "type": 6,
+            "criteria": "vcopies=true,sort=1",
+            "columns": "name=full,datecapt",
+            "children": []
+        },
+        {
+            "name": "Aspect Ratio",
+            "type": 7,
+            "data": null,
+            "children": [
+                {
+                    "name": "24x36 format",
+                    "type": 6,
+                    "criteria": "(aspectratio=>0.66666,aspectratio=<0.666667)|aspectratio=1.5",
+                    "columns": "name,datecapt,speed,aperture,iso,keywords,camera,latitude,longitude",
+                    "children": []
+                },
+                {
+                    "name": "Portrait format",
+                    "type": 6,
+                    "criteria": "aspectratio=<0.8",
+                    "columns": "name,datecapt,speed,aperture,iso,keywords,camera,latitude,longitude",
+                    "children": []
+                },
+                {
+                    "name": "Landscape format",
+                    "type": 6,
+                    "criteria": "sort=1,aspectratio=>1.2",
+                    "columns": "name,datecapt,speed,aperture,iso,keywords,camera,latitude,longitude",
+                    "children": []
+                },
+                {
+                    "name": "Square format",
+                    "type": 6,
+                    "criteria": "sort=1,aspectratio=1",
+                    "columns": "name,datecapt,speed,aperture,iso,keywords,camera,latitude,longitude",
+                    "children": []
+                }
+            ]
+        },
+        {
+            "name": "Black & White",
+            "type": 7,
+            "data": [
+                "None",
+                "None"
+            ],
+            "children": [
+                {
+                    "name": "Black & White",
+                    "type": 6,
+                    "criteria": "(grayscale|monochrome),sort=datecapt",
+                    "columns": "name,datecapt",
+                    "children": []
+                },
+                {
+                    "name": "Black & White processed",
+                    "type": 6,
+                    "criteria": "grayscale,sort=datecapt",
+                    "columns": "name,datecapt",
+                    "children": []
+                },
+                {
+                    "name": "Black  & White natively",
+                    "type": 6,
+                    "criteria": "monochrome,sort=datecapt",
+                    "columns": "name,datecapt",
+                    "children": []
+                }
+            ]
+        },
+        {
+            "name": "Stacked",
+            "type": 7,
+            "data": null,
+            "children": [
+                {
+                    "name": "Photo at top of each stack",
+                    "type": 6,
+                    "criteria": "sort=datecapt,stacks=top",
+                    "columns": "name=full,datecapt",
+                    "children": []
+                },
+                {
+                    "name": "All photos in stacks",
+                    "type": 6,
+                    "criteria": "sort=datecapt,stacks=all",
+                    "columns": "name=full,datecapt",
+                    "children": []
+                }
+            ]
+        }
+    ]
+}

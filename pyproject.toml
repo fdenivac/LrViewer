@@ -1,0 +1,64 @@
+#
+# pyproject.toml for LrViewer application
+#
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lrviewer"
+dynamic = ["version", "readme"]
+requires-python = ">=3.12"
+dependencies = [
+    "PySide6>=6.10.1",
+    "pyqtdarktheme2>=2.1.2",
+    "folium>=0.20.0",
+    "xmltodict>=1.0.2",
+    "lrtools @ git+https://github.com/fdenivac/Lightroom-SQL-tools",
+]
+description = "A Lightroom viewer without Lightroom."
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [
+    {name = "fdenivac", email = "fdenivac@gmail.com"},
+]
+maintainers = [
+  {name = "fdenivac", email = "fdenivac@gmail.com"}
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS :: MacOS X",
+    "Topic :: Multimedia :: Graphics :: Viewers",
+    "Topic :: Database",
+]
+
+
+[tool.setuptools.dynamic]
+version = {attr = "lrviewer.settings.APP_VERSION"}
+readme = {file = ["README.md"]}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+# exclude = ["obsolete", "build"]
+namespaces = true
+
+
+[project.urls]
+"Homepage" = "https://github.com/fdenivac/lrviewer"
+"Bug Reports" = "https://github.com/fdenivac/lrviewer/issues"
+"Source" = "https://github.com/fdenivac/lrviewer"
+
+
+[project.gui-scripts]
+lrviewer = "lrviewer.appLrView:main"
+

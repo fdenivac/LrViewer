@@ -1,0 +1,5 @@
+PySide6
+pyqtdarktheme2
+folium
+xmltodict
+lrtools @ git+https://github.com/fdenivac/Lightroom-SQL-tools
