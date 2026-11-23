@@ -7,12 +7,9 @@ Encapsulate Lightroom SQL Tools API (lrtools)
 """
 
 import traceback
-import os
 import logging
 import sqlite3
 
-from xml.parsers.expat import ExpatError
-import xmltodict
 
 from lrtools.lrcat import (
     LRCatDB,
@@ -27,23 +24,23 @@ from lrtools.lrselectphoto import (
 )
 from lrtools.lrtoolconfig import LRToolConfig
 
-
 log = logging.getLogger(__name__)
 
 
 class PhotosAPI:
     """encapsulates lrtools api"""
 
-    def __init__(self):
-        self.lrconfig = LRToolConfig()
+    def __init__(self, lrconfig: LRToolConfig):
+        self.lrconfig = lrconfig
         self.api = None
-        self.lrcat_file = ""
+        self._lrcat_file = ""
         self.exception = ""
         self.connected = False
         self.default_columns = "name,datecapt,aperture,speed,iso"
 
         self._columns = []
         self._hidden_columns = []
+        self._hidden_columns_name = []
         self._map_indexes = {}  # map internal index to user index
 
         self._dcriteria = {}
@@ -52,17 +49,16 @@ class PhotosAPI:
         self.user_sortcol = "1"
         self.current_id_smart = None
 
-    def open(self, lrcat_file):
-        """open Lightroomm catalog"""
-        # open Lightroom catalog
+    def open(self, lrcat_file: str) -> bool:
+        """open Lightroom catalog"""
         try:
-            self.lrcat_file = lrcat_file
-            self.api = LRCatDB(self.lrconfig, lrcat_file)
+            self._lrcat_file = lrcat_file
+            self.api = LRCatDB(self.lrconfig, self._lrcat_file)
             self.connected = True
             self.query_results = []
             return True
-        except LRCatException as _e:
-            self.exception = str(_e)
+        except LRCatException as e:
+            self.exception = str(e)
             self.connected = False
             self.query_results = []
             return False
@@ -71,14 +67,33 @@ class PhotosAPI:
         """status connected"""
         return self.connected
 
-    def set_columns(self, columns) -> None:
+    def catalog_path(self) -> str:
+        """return current Lightroom catalog"""
+        return self._lrcat_file
+
+    def set_columns(self, columns: str) -> None:
         """default columns when query() not using columns"""
         self.default_columns = columns
         self._set_columns(self.default_columns)
 
-    def _set_columns(self, columns) -> None:
+    def add_hidden_columns(self, columns: str) -> None:
+        """add hidden columns"""
+        columns = [col.strip().lower() for col in columns.split(",")]
+        for col_name in columns:
+            if not col_name in self._hidden_columns_name:
+                self._hidden_columns_name.append(col_name)
+
+    def remove_hidden_columns(self, columns: str) -> None:
+        """remove hidden columns"""
+        columns = [col.strip().lower() for col in columns.split(",")]
+        for col_name in columns:
+            if col_name in self._hidden_columns_name:
+                self._hidden_columns_name.remove(col_name)
+
+    def _set_columns(self, columns: str) -> None:
         """internal set columns"""
         self._columns = [col.strip().lower() for col in columns.split(",")]
+        self._hidden_columns = [False] * len(self._columns)
         # "id" column no needed when criter "distinct", or columns "count()", "countby()""
         need_id = "distinct" not in self._dcriteria
         if need_id:
@@ -86,19 +101,20 @@ class PhotosAPI:
                 if col.startswith("count(") or col.startswith("countby("):
                     need_id = False
                     break
-        # manage hidden "id" column
-        hidden_id = False
         if need_id:
-            hidden_id = "id" not in self._columns
-            if hidden_id:
-                self._columns.insert(0, "id")
-        self._hidden_columns = [False] * len(self._columns)
-        # final
-        if hidden_id:
-            self._hidden_columns[self.column_index("id")] = True
+            self.add_hidden_columns("id")
+
+        # add hidden columns to query
+        for col in self._hidden_columns_name:
+            if col in self._columns:
+                # column exists, do not change visibility
+                continue
+            self._columns.append(col)
+            self._hidden_columns.append(True)
+
         self._build_map_indexes()
 
-    def _can_reuse_columns(self):
+    def _can_reuse_columns(self) -> bool:
         """return True if current columns is reusable by query"""
         if len(self._columns) == 0:
             return False
@@ -108,14 +124,12 @@ class PhotosAPI:
                 return False
         return True
 
-    def prepare_query(self, criteria=None, columns=None) -> None:
+    def prepare_query(self, criteria: str = None, columns=None) -> None:
         """set column, criteria"""
         self.current_id_smart = None
-        if criteria:
+        if criteria is not None:
             # set dict criteria before work on columns
             self._dcriteria = criteria_to_dict(criteria)
-            # TODO A VERIFIER
-            # if not columns:
             if "sort" not in self._dcriteria:
                 # previous columns not modified : reuse previous sort TODO BUT SAFE ?
                 self._dcriteria["sort"] = [self.user_sortcol]
@@ -133,7 +147,7 @@ class PhotosAPI:
             if not self._can_reuse_columns():
                 self._set_columns(self.default_columns)
 
-        if criteria:
+        if criteria is not None:
             if "sort" in self._dcriteria:
                 user_sortcol = self._dcriteria["sort"][0]
                 self.user_sortcol = user_sortcol
@@ -170,12 +184,13 @@ class PhotosAPI:
         query from criteria and columns.
         Return True if success
         """
+        log.info("query started : %s %s", columns, criteria)
         try:
             self.prepare_query(criteria, columns)
         except LRSelectException as _e:
             self.exception = str(_e)
             self._clean_on_error()
-            log.info("query failed : %s", self.exception)
+            log.error("query failed : %s", self.exception)
             return False
         return self._query()
 
@@ -196,8 +211,8 @@ class PhotosAPI:
             LRSelectException,
             sqlite3.OperationalError,
             sqlite3.DatabaseError,
-        ) as _e:
-            self.exception = str(_e)
+        ) as e:
+            self.exception = str(e)
         return self._finalize_query()
 
     def sort_column(self) -> int:
@@ -226,19 +241,19 @@ class PhotosAPI:
         index = self._index_from_internal(index)
         return index
 
-    def query_sort(self, column: any, ascendingOrder: bool) -> int:
+    def query_sort(self, column: int, ascending_order: bool) -> int:
         """set sort column and execute query already set"""
         assert "sort" in self._dcriteria
         if isinstance(column, str):
-            if ascendingOrder:
+            if ascending_order:
                 column = f"-{column}"
             self._dcriteria["sort"] = [column]
             self.user_sortcol = column
         else:
             assert isinstance(column, int)
             column = self._index_internal(column)
-            if ascendingOrder:
-                self._dcriteria["sort"] = [-column if ascendingOrder else column]
+            if ascending_order:
+                self._dcriteria["sort"] = [-column if ascending_order else column]
         log.info("set sort=%s", self._dcriteria["sort"][0])
         if self.current_id_smart is not None:
             return self.smart_query(self.current_id_smart, self._dcriteria["sort"][0])
@@ -253,8 +268,8 @@ class PhotosAPI:
                 self.lrconfig, self.api, id_smart, ",".join(self._columns), sort_column
             )
             self.exception = ""
-        except (LRSelectException, SmartException, sqlite3.OperationalError) as _e:
-            self.exception = str(_e)
+        except (LRSelectException, SmartException, sqlite3.OperationalError) as e:
+            self.exception = str(e)
         return self._finalize_query()
 
     def query_smart_data(self, smart_data: str) -> int:
@@ -262,7 +277,7 @@ class PhotosAPI:
         self.query_results = []
         builder = SQLSmartColl(self.lrconfig, self.api, smart_data)
         sql = builder.build_sql(",".join(self._columns))
-        log.info("sql by smartdata: %s", sql)
+        log.debug("sql by smartdata: %s", sql)
         try:
             self.query_results = self.api.cursor.execute(sql).fetchall()
         except (LRSelectException, sqlite3.OperationalError) as _e:
@@ -276,7 +291,7 @@ class PhotosAPI:
     def _finalize_query(self) -> bool:
         """finalize, clean after query"""
         if self.exception:
-            log.info("query failed : %s", self.exception)
+            log.error("query failed : %s", self.exception)
             self._clean_on_error()
             return False
         if self.query_results:
@@ -296,7 +311,7 @@ class PhotosAPI:
         dcriteria["sort"] = [self.user_sortcol]
         return dict_to_criteria(dcriteria)
 
-    def columns(self, visible_col=False) -> str:
+    def columns(self, visible_col: bool = False) -> str:
         """return current columns in string format"""
         if visible_col:
             columns = [
@@ -328,7 +343,7 @@ class PhotosAPI:
             self._map_indexes[index_ext] = index_int
             index_ext += 1
 
-    def _index_internal(self, index) -> dict:
+    def _index_internal(self, index: int) -> int:
         """return internal index from visible index"""
         try:
             return self._map_indexes[index]
@@ -336,18 +351,19 @@ class PhotosAPI:
             log.error("BUG KeyError map_indexes[%s]", index)
             return -1
 
-    def _index_from_internal(self, index):
+    def _index_from_internal(self, index: int) -> int:
         """return visible index from internal index"""
         # TODO try for track rare bug
         try:
             rmap = {v: k for k, v in self._map_indexes.items()}
             return rmap[index]
         except KeyError:
-            print(f"BUG _index_from_internal index:{index}, rmap:{rmap}")
-            traceback.print_stack()
+            log.error(f"BUG _index_from_internal index:{index}, rmap:{rmap}")
             return 0
 
-    def query_result(self, row: int, column: int, visible_col=True, raw=False):
+    def query_result(
+        self, row: int, column: int, visible_col: bool = True, raw: bool = False
+    ):
         """return query result from row and visible column"""
         if visible_col:
             column = self._index_internal(column)
@@ -358,10 +374,10 @@ class PhotosAPI:
         if func_format:
             if value is None:
                 return value
-            return func_format(self.query_results[row][column])
-        return self.query_results[row][column]
+            return func_format(value)
+        return value
 
-    def column_index(self, name: str):
+    def column_index(self, name: str) -> int:
         """return column index or -1 if no name in columns"""
         if name not in self._columns:
             return -1
@@ -371,14 +387,14 @@ class PhotosAPI:
         """True if "id" column present"""
         return self.column_index("id") != -1
 
-    def columns_count(self, visible_col=False) -> int:
+    def columns_count(self, visible_col: bool = False) -> int:
         """current columns"""
         if visible_col:
             return len(self._map_indexes)
 
         return len(self._columns)
 
-    def column(self, index: int, visible_col) -> str:
+    def column(self, index: int, visible_col: bool) -> str:
         """return column name for index"""
         if visible_col:
             index_int = self._index_internal(index)
@@ -390,7 +406,7 @@ class PhotosAPI:
         """return query count"""
         return len(self.query_results)
 
-    def format_data(self, column: int, data: str, visible_col=False) -> str:
+    def format_data(self, column: int, data: str, visible_col: bool = False) -> str:
         """format specific datas"""
         if visible_col:
             column = self._index_internal(column)
@@ -411,157 +427,4 @@ class PhotosAPI:
 
 
 # create default PhotosAPI instance
-lr_api = PhotosAPI()
-
-
-class PhotoMetadatas(PhotosAPI):
-    """
-    retrieve / manage metadatas for unique photo
-    """
-
-    LTR_COLNAMES = {
-        "name": ("Filename", "name and extension"),
-        "name=full": ("Full filename",),
-        "rating": (
-            "Rating",
-            "from 0 to 5",
-        ),
-        "flag": (
-            "Flag",
-            "flagged, unflagged, rejected",
-        ),
-        "datecapt": ("Date Capture",),
-        "datemod": ("Date Last Modification",),
-        "datehist": ("Date History",),
-        "modcount": ("Count Modifications",),
-        "dims": ("Dimensions",),
-        "aspectratio": ("Aspect Ratio",),
-        "aperture": ("Aperture",),
-        "speed": ("Speed",),
-        "iso": ("ISO",),
-        "focal": ("Focal",),
-        "flash": ("Flash",),
-        "monochrome": ("Monochrome",),
-        "camera": ("Camera",),
-        "camerasn": ("Camera Serial Number",),
-        "lens": ("Lens",),
-        "keywords": ("Keywords",),
-        "collections": ("Collections",),
-        "title": ("Title",),
-        "caption": ("Caption",),
-        "creator": ("Creator",),
-        "copyright": ("Copyright",),
-        "location": ("Location",),
-        "city": ("City",),
-        "country": ("Country",),
-        "state": ("State",),
-        "latitude": ("Latitude",),
-        "longitude": ("Longitude",),
-        "colorlabel": ("Color Label",),
-    }
-
-    def __init__(self):
-        super().__init__()
-        self.names = (
-            "name=full_vc,datecapt,datemod,caption,rating,colorlabel,flag,creator,copyright,modcount,aperture,speed,iso,focal,"
-            "camera,camerasn,lens,monochrome,flash,dims,aspectratio,keywords,collections,"
-            "location,city,country,state,latitude,longitude,master,stack,stackpos,xmp"
-        )
-        self._metadatas = {}
-
-    def clone_connection(self, other: PhotosAPI):
-        """clone connection from other PhotosAPI instance"""
-        self.api = other.api
-        self.connected = other.connected
-
-    def readMetadatas(self, id_photo):
-        """set metadatas"""
-        self._metadatas = {}
-
-        def add_meta(name, value):
-            if value is None:
-                return
-            if name in self.LTR_COLNAMES:
-                name = self.LTR_COLNAMES[name][0]
-            self._metadatas[name] = value
-
-        logging.disable(logging.INFO)
-        self.query(f"id={id_photo}", self.names)
-        logging.disable(logging.NOTSET)
-        if self.exception:
-            return False
-
-        # metadatas are displayed in self.names order
-        #  but some metadatas must be extracted from "xmp"
-
-        # TODO filter and categories of metadatas (main,iptc,gps,...) to do in metadatasView
-
-        xmp = {}
-        if "xmp" in self.names:
-            try:
-                value = self.query_result(
-                    0, self.column_index("xmp"), visible_col=False
-                )
-                xmp = xmltodict.parse(value)
-                xmp = xmp["x:xmpmeta"]["rdf:RDF"]["rdf:Description"]
-            except ExpatError as _e:
-                log.error("Failed to parse xmp : %s", _e)
-
-        for index, name in enumerate(self.names.split(",")):
-            if name == "xmp":
-                continue
-            index = self.column_index(name)
-            if index < 0:
-                log.warning("metadatas- no column %s", name)
-                continue
-            value = self.query_result(0, index, visible_col=False)
-
-            if name == "caption":
-                # introduce xmp "title" before "caption"
-                if "dc:title" in xmp:
-                    li = xmp["dc:title"]["rdf:Alt"]["rdf:li"]
-                    if "#text" in li:
-                        self._metadatas["Title"] = li["#text"]
-
-            if name == "keywords":
-                add_meta(name, value)
-                # introduce "hierarchical keywords" after "keywords"
-                if "lr:hierarchicalSubject" in xmp:
-                    self._metadatas["Hierarchical Keywords"] = xmp[
-                        "lr:hierarchicalSubject"
-                    ]["rdf:Bag"]["rdf:li"]
-                continue
-
-            if name == "aspectratio":
-                # introduce "projection" after "aspectratio"
-                add_meta(name, value)
-                if "@GPano:ProjectionType" in xmp:
-                    self._metadatas["Pano Projection"] = xmp["@GPano:ProjectionType"]
-                continue
-
-            if name == "name=full_vc":
-                folder, name = os.path.split(value)
-                self._metadatas["Name"] = name
-                self._metadatas["Folder"] = folder
-                continue
-
-            if name == "colorlabel" and not value:
-                continue
-
-            add_meta(name, value)
-
-        return True
-
-    def metadatas(self) -> dict:
-        """return metadatas"""
-        return self._metadatas
-
-    def gps_location(self) -> tuple[float, float]:
-        """return gps location in tuple (longitude, latitude) or (None, None)"""
-        try:
-            return (
-                self.query_results[0][self.column_index("latitude")],
-                self.query_results[0][self.column_index("longitude")],
-            )
-        except IndexError:
-            return (None, None)
+lr_api = PhotosAPI(LRToolConfig())

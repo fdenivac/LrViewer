@@ -4,7 +4,9 @@
 """
 Folium Map Widget
 
-Supported map : all maps not needing specific attribute or registration
+    - Manage maps selection, map page navigation, photo markers and clusters
+
+    - Supported map : all maps not needing specific attribute or registration
 """
 
 # infos:
@@ -32,15 +34,13 @@ from PySide6.QtGui import (
 from PySide6.QtCore import (
     Qt,
     Signal,
-    QObject,
     QEventLoop,
-    QCoreApplication,
 )
 from PySide6.QtWidgets import (
     QApplication,
     QMenu,
 )
-from jinja2 import Template
+from jinja2 import Template, Environment, FileSystemLoader, StrictUndefined
 import folium
 from folium.map import FeatureGroup, CustomPane
 from folium.plugins import MarkerCluster
@@ -194,7 +194,7 @@ class MapWidget(QtWidgets.QWidget):
         try:
             key, value = msg.split(": ", maxsplit=1)
         except ValueError:
-            print(msg)
+            log.warning(msg)
             return
         if key == "location":
             data = json.loads(value)
@@ -215,9 +215,9 @@ class MapWidget(QtWidgets.QWidget):
             self.markerClick.emit(photo_id)
         elif key == "mapbounds":
             self._js_response = json.loads(value)
-            log.info("handleConsole : %s", self._js_response)
+            log.info("mapbounds : %s", self._js_response)
         else:
-            print(msg)
+            log.warning("javascript : %s", msg)
 
     def setMapType(self, map_type: str, use_cluster: bool = True):
         """set map type (tiles)"""
@@ -267,77 +267,29 @@ class MapWidget(QtWidgets.QWidget):
         return self.map_type
 
     def _add_customjs(self):
-        """add custom javascript to html page"""
-        my_js = f"""
-    {self.map.get_name()}.on("click",
-        function (e) {{
-            var data = `${{JSON.stringify(e.latlng)}}`;
-            console.log("location:", data)
-        }});
+        """add custom javascript to html page using Jinja2 template"""
+        # Load template from a file
+        env = Environment(
+            loader=FileSystemLoader("templates/js"), undefined=StrictUndefined
+        )
+        template = env.get_template("map_js_template.j2")
 
-    {self.map.get_name()}.on("zoomend", function (e) {{
-        console.log("zoom:", e.target._zoom);
-    }});
+        # Render with context
+        js_content = template.render(
+            map=self.map, cluster=self.cluster, currentGroup=self.currentGroup
+        )
 
-    function onMarkerClick(e) {{
-            var marker = e.target;
-            console.log("typeof", typeof(e.target))
-            var data = `${{JSON.stringify(marker.options.idphoto)}}`;
-            console.log("idphoto:", data);
-            }}
-
-    function setClusterMarkers(datas) {{
-        datas.forEach(elt => {{
-            L.marker(elt[0], {{"idphoto":elt[1]}}).addTo({self.cluster.get_name()}).on('click', onMarkerClick);
-        }})
-    }}
-
-    function hideCurrentLayer() {{
-        if ({self.map.get_name()}.hasLayer({self.currentGroup.get_name()})) {{
-           // console.log("current layer active, remove it");
-            {self.map.get_name()}.removeLayer({self.currentGroup.get_name()})
-        }} else {{
-            // console.log("no current layer, ignore");
-        }}
-    }}
-
-    function showCurrentLayer() {{
-        if ({self.map.get_name()}.hasLayer({self.currentGroup.get_name()})) {{
-            //console.log("current layer active, ignore");
-            return;
-        }} else {{
-            //console.log("no current layer, add it");
-            {self.currentGroup.get_name()}.addTo({self.map.get_name()})
-        }}
-    }}
-
-    function toggleClusterLayer() {{
-        if ({self.map.get_name()}.hasLayer({self.cluster.get_name()})) {{
-            console.log("cluster layer active: remove it");
-            {self.map.get_name()}.removeLayer({self.cluster.get_name()})
-        }} else {{
-            console.log("no cluster layer: add it");
-            {self.cluster.get_name()}.addTo({self.map.get_name()})
-        }}
-    }}
-
-    function getMapBounds() {{
-        var bounds = {self.map.get_name()}.getBounds();
-        var data = `${{JSON.stringify(bounds)}}`;
-        console.log("mapbounds:", data)
-    }}
-        """
-
-        e = Element(my_js)
+        # Add rendered JS to the folium map
+        js_element = Element(js_content)
         html = self.map.get_root()
         html.script.get_root().render()
-        # Insert new element or custom JS
-        html.script._children[e.get_name()] = e  # pylint: disable=protected-access
+        html.script._children[js_element.get_name()] = js_element
 
     def set_location(self, new_coords: tuple[float, float], photo_id: int, flyto: bool):
         """
         change location of current marker
         """
+        log.info("set_location %s", new_coords)
         if self._fake:
             return
         if not self._page_loaded:
@@ -362,13 +314,14 @@ class MapWidget(QtWidgets.QWidget):
             {self.marker.get_name()}.options.idphoto = [{photo_id}];
             showCurrentLayer();
             """
-        self.webView.page().runJavaScript(js_code)
+        self.webView.page().runJavaScript(js_code, self._js_empty_callback)
         self.marker.location = new_coords
 
     def set_locations(self, coords: list[tuple[int, tuple[float, float]]]):
         """
         set multiple locations: new map builded
         """
+        log.info("set_locations for %s coordinates", len(coords))
         if self._fake:
             return
         if not coords:
@@ -387,12 +340,8 @@ class MapWidget(QtWidgets.QWidget):
         """set locations from internal self.set_location dict"""
         if not self.locs_photos:
             return
-        js_datas = []
-        for location, ids in self.locs_photos.items():
-            js_datas.append((location, ids))
-        js_code = f"""locdatas = {json.dumps(js_datas)};
-        setClusterMarkers(locdatas);"""
-        self.webView.page().runJavaScript(js_code)
+        js_code = f"""locdatas = {json.dumps(list(self.locs_photos.items()))}; setClusterMarkers(locdatas);"""
+        self.webView.page().runJavaScript(js_code, self._js_empty_callback)
 
     def hide_current_location(self):
         """
@@ -401,7 +350,7 @@ class MapWidget(QtWidgets.QWidget):
         if self._fake:
             return
         js_code = "hideCurrentLayer();"
-        self.webView.page().runJavaScript(js_code)
+        self.webView.page().runJavaScript(js_code, self._js_empty_callback)
 
     def _on_load_finished(self, ok: bool):
         """signal page loaded"""
@@ -429,7 +378,9 @@ class MapWidget(QtWidgets.QWidget):
 
     def toggleMarkers(self):
         """toggle show cluster markers"""
-        self.webView.page().runJavaScript("toggleClusterLayer();")
+        self.webView.page().runJavaScript(
+            "toggleClusterLayer();", self._js_empty_callback
+        )
 
     def removeMarkers(self):
         """remove markers from cluster layer"""
@@ -439,19 +390,24 @@ class MapWidget(QtWidgets.QWidget):
         js_code = f"""
             {self.cluster.get_name()}.clearLayers();
             """
-        self.webView.page().runJavaScript(js_code)
+        self.webView.page().runJavaScript(js_code, self._js_empty_callback)
 
         js_code += f"""
             hideCurrentLayer();
             //{self.currentGroup.get_name()}.clearLayers();
         """
-        self.webView.page().runJavaScript(js_code)
+        self.webView.page().runJavaScript(js_code, self._js_empty_callback)
 
     def setUseMarkerCluster(self, checked):
         """use cluster of markers"""
         self.setMapType(self.mapWidget.getMapType(), use_cluster=checked)
 
-    # def _wait_js_response(self):
+    # Empty callback function for runJavaScript
+    def _js_empty_callback(self, result):
+        """Empty callback function for JavaScript execution"""
+        if result:
+            log.debug('js_callback return "%s"', result)
+
     def _js_command_wait_response(self, command: str, timeout: int = 500) -> dict:
         """Launch javascript command and wait for response in self._js_response.
         timeout is in ms

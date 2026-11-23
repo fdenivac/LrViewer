@@ -77,16 +77,14 @@ class JsonSortFilterProxyModel(QtCore.QSortFilterProxyModel):
     def accept_index(self, index):
         if index.isValid():
             text = str(index.data(self.filterRole()))
-            # TODO Qt5 à Qt6
-            # if self.filterRegularExpression().indexIn(text) >= 0:
-            #     return True
+            if self.filterRegularExpression().match(text).hasMatch():
+                return True
             if self.keep_children:
                 parent = index.parent()
                 while parent.isValid():
                     parent_text = str(parent.data(self.filterRole()))
-                    # TODO Qt5 à Qt6
-                    # if self.filterRegularExpression().indexIn(parent_text) >= 0:
-                    #     return True
+                    if self.filterRegularExpression().match(parent_text).hasMatch():
+                        return True
                     parent = parent.parent()
             for row in range(index.model().rowCount(index)):
                 if self.accept_index(

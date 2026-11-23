@@ -15,10 +15,7 @@ import logging
 from PySide6.QtCore import (
     Signal,
 )
-from PySide6.QtWidgets import (
-    QPlainTextEdit,
-    QFileDialog,
-)
+from PySide6.QtWidgets import QPlainTextEdit, QFileDialog, QMessageBox
 from PySide6.QtGui import (
     QAction,
     QCursor,
@@ -68,9 +65,11 @@ class LoggerWidget(QPlainTextEdit, logging.Handler):
         )
         if not filename:
             return
-        self.toPlainText()
-        with open(filename, "w", encoding="utf8") as f:
-            f.write(self.toPlainText())
+        try:
+            with open(filename, "w", encoding="utf8") as f:
+                f.write(self.toPlainText())
+        except IOError as e:
+            QMessageBox.critical(self, "Error", f"Error saving log: {e}")
 
     def onClearLog(self):
         """clear log window"""

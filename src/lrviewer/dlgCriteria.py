@@ -35,7 +35,6 @@ from PySide6.QtCore import (
 
 from ui.criteria_ui import Ui_Dialog
 
-
 log = logging.getLogger(__name__)
 
 PH_STR_OR_WILDCARDS = "string and wildchards '%'"
@@ -246,7 +245,7 @@ CRITERIA_DESC = {
         "type": "str",
         "placeholder": PH_STR_OR_NULL,
     },
-    "haskeywords": {
+    "haskeyword": {
         "help": "Select photos with or without any keywords ",
         "type": "choices",
         "values": ["true", "false"],
@@ -260,6 +259,11 @@ CRITERIA_DESC = {
         "help": "Keyword id (id_local of table AgLibraryKeyword)",
         "type": "int",
         "placeholder": PH_INTEGER,
+    },
+    "hascollection": {
+        "help": "Select photos existing in one or more collections",
+        "type": "choices",
+        "values": ["true", "false"],
     },
     "collection": {
         "help": "Photos Collection name",

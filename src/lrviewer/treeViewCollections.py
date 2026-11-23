@@ -40,7 +40,6 @@ from settings import settings
 from modelCollections import CollectionsModel, TreeItem, ItemType
 from uiDialogs import QueryDialog
 
-
 log = logging.getLogger(__name__)
 
 
@@ -69,6 +68,7 @@ class CollectionsView(QTreeView):
         self.uniformRowHeights = True
 
         self.clicked.connect(self.on_click)
+        self.doubleClicked.connect(self.on_doubleclick)
         self.expanded.connect(self.on_expanded)
         self.collapsed.connect(self.on_collapsed)
 
@@ -86,6 +86,14 @@ class CollectionsView(QTreeView):
         log.info("Click on collection")
         index = self.model().mapToSource(index)
         self.selectCollection.emit(index)
+
+    def on_doubleclick(self, index):
+        """doubleclick on collection"""
+        log.info("Click on collection")
+        index = self.model().mapToSource(index)
+        item: TreeItem = index.internalPointer()
+        if item.itemType() == ItemType.LRTOOLS_QUERY:
+            self.onRenameQuery(True, index)
 
     def on_expanded(self, index):
         """on expand collection : scroll center"""

@@ -5,6 +5,7 @@ Slideshow widget
 
 modified from "https://github.com/yjg30737/pyqt-slideshow"
 """
+
 import os
 import logging
 
@@ -13,11 +14,13 @@ from PySide6.QtCore import (
     QTimer,
     QEvent,
     Signal,
+    QRect,
 )
 from PySide6.QtWidgets import (
     QWidget,
     QGridLayout,
     QHBoxLayout,
+    QVBoxLayout,
 )
 from PySide6.QtGui import (
     QPixmap,
@@ -27,15 +30,19 @@ from PySide6.QtGui import (
 from .graphicsView import SingleImageGraphicsView
 from .svgbutton import QSvgButtonIcon
 
-
 log = logging.getLogger(__name__)
-log.setLevel(logging.INFO)
 
 
 STYLE_SLIDESHOW = """
 QWidget {
-    background: transparent; border: 0px;
+    background: transparent; 
 }
+
+SingleImageGraphicsView {
+    border: none; 
+    background: transparent; 
+}
+
 QSvgButtonIcon {
     padding:  5px;
     padding-left: 20px;
@@ -71,68 +78,98 @@ class SlideShow(QWidget):
 
     previous = Signal()
     next = Signal(bool)
+    play = Signal()
+    pause = Signal()
     doubleClicked = Signal()
+    exitFullscreen = Signal()
 
-    def __init__(self, parent=None, flags=Qt.WindowType.Widget):
-        """init forcing Window Type (seems mandatory for set full screen mode)"""
-        super().__init__(parent, flags)
-        self.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, False)
+    def __init__(self, parent=None):
+        super().__init__(parent)
         self.setStyleSheet(STYLE_SLIDESHOW)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.__interval = 6000
-        self.__initUi()
+        self._interval = 6000
 
-    def __initUi(self):
-        self.__view = SingleImageGraphicsView()
-        self.__view.setAspectRatioMode(Qt.AspectRatioMode.KeepAspectRatio)
-        self.__view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.__view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.__view.setStyleSheet("QGraphicsView { background: black; border: 0px; }")
-        self.__view.installEventFilter(self)
+        self._initUi()
 
-        self.__btnWidget = QWidget()
+    def _initUi(self):
+        self._view = SingleImageGraphicsView()
+        self._view.setAspectRatioMode(Qt.AspectRatioMode.KeepAspectRatio)
+        self._view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._view.installEventFilter(self)
 
-        self.__prevBtn = QSvgButtonIcon(
-            os.path.join(os.path.realpath(os.path.dirname(__file__)), "arrow-left.svg")
-        )
-        self.__prevBtn.setObjectName("svgWidget")
-        self.__prevBtn.setSvgSize(100, 100)
-        self.__prevBtn.clicked.connect(self.__prev)
-        self.__prevBtn.setEnabled(True)
+        self._btnWidget = QWidget()
 
-        self.__nextBtn = QSvgButtonIcon(
-            os.path.join(os.path.realpath(os.path.dirname(__file__)), "arrow-right.svg")
-        )
-        self.__nextBtn.setObjectName("svgWidget")
-        self.__nextBtn.setSvgSize(100, 100)
-        self.__nextBtn.clicked.connect(self.__nextClicked)
-        self.__nextBtn.setEnabled(True)
+        self._prevBtn = self._create_nav_button("arrow-left.svg")
+        self._prevBtn.clicked.connect(self._prev)
+
+        self._nextBtn = self._create_nav_button("arrow-right.svg")
+        self._nextBtn.clicked.connect(self._nextClicked)
+
+        self._playBtn = self._create_nav_button("play.svg")
+        self._playBtn.clicked.connect(self._playClicked)
+
+        self._pauseBtn = self._create_nav_button("pause.svg")
+        self._pauseBtn.clicked.connect(self._pauseClicked)
+
+        lay_nav = QVBoxLayout()
 
         lay = QHBoxLayout()
-        lay.addWidget(self.__prevBtn, alignment=Qt.AlignmentFlag.AlignLeft)
-        lay.addWidget(self.__nextBtn, alignment=Qt.AlignmentFlag.AlignRight)
+        lay.addWidget(
+            QWidget(geometry=QRect(0, 0, 100, 100)),
+            alignment=Qt.AlignmentFlag.AlignLeft,
+        )
+        lay_nav.addLayout(lay)
 
-        self.__navWidget = QWidget()
-        self.__navWidget.setLayout(lay)
+        lay = QHBoxLayout()
+        lay.addWidget(self._prevBtn, alignment=Qt.AlignmentFlag.AlignLeft)
+        lay.addWidget(self._nextBtn, alignment=Qt.AlignmentFlag.AlignRight)
+        lay_nav.addLayout(lay)
+
+        lay = QVBoxLayout()
+        lay.addWidget(self._playBtn, alignment=Qt.AlignmentFlag.AlignCenter)
+        lay_nav.addLayout(lay)
+
+        self._navWidget = QWidget()
+        self._navWidget.setLayout(lay_nav)
 
         lay = QGridLayout()
-        lay.addWidget(self.__view, 0, 0, 3, 1)
-        lay.addWidget(self.__navWidget, 0, 0, 3, 1)
-        lay.addWidget(self.__btnWidget, 2, 0, 1, 1, Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(self._view, 0, 0, 3, 1)
+        lay.addWidget(self._navWidget, 0, 0, 3, 1)
+        lay.addWidget(self._btnWidget, 2, 0, 1, 1, Qt.AlignmentFlag.AlignCenter)
         self.setLayout(lay)
 
-        self.__timer = QTimer(self)
-        self.__timer.setInterval(self.__interval)
-        self.__timer.timeout.connect(self.__nextByTimer)
-        self.__timer.stop()
+        self._timer = QTimer(self)
+        self._timer.setInterval(self._interval)
+        self._timer.timeout.connect(self._nextByTimer)
+        self._timer.stop()
+
+    def _create_nav_button(self, icon_path: str) -> QSvgButtonIcon:
+        """Create a navigation button with SVG icon"""
+        btn = QSvgButtonIcon(
+            os.path.join(os.path.realpath(os.path.dirname(__file__)), icon_path)
+        )
+        btn.setObjectName("svgWidget")
+        btn.setSvgSize(100, 100)
+        btn.setEnabled(True)
+        return btn
 
     def keyPressEvent(self, event):
         """process keys arrow left/right"""
         if event.key() == Qt.Key.Key_Left:
             self.previous.emit()
             return True
-        elif event.key() == Qt.Key.Key_Right:
+        if event.key() == Qt.Key.Key_Right:
             self.next.emit(False)
+            return True
+        if event.key() == Qt.Key.Key_Escape:
+            self.exitFullscreen.emit()
+            return True
+        if event.key() == Qt.Key.Key_Space:
+            if self._timer.isActive():
+                self.pause.emit()
+            else:
+                self.play.emit()
             return True
         return super().keyPressEvent(event)
 
@@ -142,69 +179,102 @@ class SlideShow(QWidget):
             return True
         return super().event(event)
 
-    def __prev(self):
+    def _prev(self):
         """click button previous"""
         self.previous.emit()
 
-    def __nextByTimer(self):
+    def _nextByTimer(self):
         """next by timer"""
         log.info("Timer signal")
         self.next.emit(False)
 
-    def __nextClicked(self):
+    def _nextClicked(self):
         """click button next"""
         self.next.emit(True)
 
+    def _playClicked(self):
+        """click button play"""
+        self.play.emit()
+
+    def _pauseClicked(self):
+        """click button pause"""
+        self.pause.emit()
+
     def setInterval(self, milliseconds: int):
         """change timer value"""
-        self.__interval = milliseconds
-        self.__timer.setInterval(milliseconds)
+        self._interval = milliseconds
+        self._timer.setInterval(milliseconds)
 
     def getInterval(self) -> int:
         """get timer value"""
-        return self.__interval
+        return self._interval
 
     def setPhoto(self, photo: QPixmap):
         """set photo"""
-        self.__view.setImage(photo)
+        self._view.setImage(photo)
 
     def setNavigationButtonVisible(self, f: bool):
         """hide navigation widget"""
-        self.__navWidget.setVisible(f)
+        self._navWidget.setVisible(f)
 
     def setBottomButtonVisible(self, f: bool):
         """hide buttons widget"""
-        self.__btnWidget.setVisible(f)
+        self._btnWidget.setVisible(f)
 
-    def setTimerEnabled(self, f: bool):
-        """start/stop timer"""
+    def startSlideshow(self, f: bool):
+        """start/stop timer and toggle play/pause icon in layout"""
         if f:
-            self.__timer.start()
-        else:
-            self.__timer.stop()
+            self._timer.start()
+            log.info("play")
+            # remove play icon
+            if self._playBtn.parent() == self._navWidget:
+                self._navWidget.layout().removeWidget(self._playBtn)
+                self._playBtn.setParent(None)
+            self._playBtn.setVisible(False)
+            # insert pause icon
+            if self._pauseBtn.parent() != self._navWidget:
+                self._navWidget.layout().addWidget(
+                    self._pauseBtn, alignment=Qt.AlignmentFlag.AlignCenter
+                )
+            self._pauseBtn.setVisible(True)
 
-    def isTimerActive(self):
+        else:
+            self._timer.stop()
+            log.info("pause")
+            # remove pause icon
+            if self._pauseBtn.parent() == self._navWidget:
+                self._navWidget.layout().removeWidget(self._pauseBtn)
+                self._pauseBtn.setParent(None)
+            self._pauseBtn.setVisible(False)
+            # insert play icon
+            if self._playBtn.parent() != self._navWidget:
+                self._navWidget.layout().addWidget(
+                    self._playBtn, alignment=Qt.AlignmentFlag.AlignCenter
+                )
+            self._playBtn.setVisible(True)
+
+    def isSlideshowActive(self):
         """return True if Slideshow running"""
-        return self.__timer.isActive()
+        return self._timer.isActive()
 
     def getBtnWidget(self):
         """get the btn widget
 
         to set the spacing (currently) :
-            self.__btnWidget.layout().setSpacing(5)
+            self._btnWidget.layout().setSpacing(5)
         """
-        return self.__btnWidget
+        return self._btnWidget
 
     def getPrevBtn(self):
         """get the prev button"""
-        return self.__prevBtn
+        return self._prevBtn
 
     def getNextBtn(self):
         """get the next button"""
-        return self.__nextBtn
+        return self._nextBtn
 
     def resizeEvent(self, event: QResizeEvent):
         """event resize window"""
         ratio = min(event.size().width() / 1600, event.size().height() / 1600)
-        self.__prevBtn.setSvgSize(int(BT_SIZE_REF * ratio), int(BT_SIZE_REF * ratio))
-        self.__nextBtn.setSvgSize(int(BT_SIZE_REF * ratio), int(BT_SIZE_REF * ratio))
+        self._prevBtn.setSvgSize(int(BT_SIZE_REF * ratio), int(BT_SIZE_REF * ratio))
+        self._nextBtn.setSvgSize(int(BT_SIZE_REF * ratio), int(BT_SIZE_REF * ratio))

@@ -12,8 +12,7 @@ from qt_json_view.model import JsonModel
 from qt_json_view.view import JsonView
 
 
-from lrApi import PhotoMetadatas
-
+from metadatas import PhotoMetadatas
 
 log = logging.getLogger(__name__)
 

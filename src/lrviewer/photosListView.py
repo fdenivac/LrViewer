@@ -27,17 +27,15 @@ from PySide6.QtGui import (
     QResizeEvent,
 )
 
+from settings import settings
 from modelPhotos import (
     PhotosModel,
-    ThumbTextDelegate,
     LrSortFilterProxyModel,
 )
+from delegateText import ThumbTextDelegate
 
 # logger
 log = logging.getLogger(__name__)
-
-# sort and filter model
-USE_SORT_LIST_MODEL = False
 
 # height of photos list rows : (without_thumbnail, with_thumbnail)
 #   the with_thumbnail value is also the thumbnail resized
@@ -98,7 +96,7 @@ class PhotosListView(QTableView):
         """Init Custom model"""
         super().__init__()
 
-        if USE_SORT_LIST_MODEL:
+        if settings.value("useSortListModel", False):
             self.proxyModel = LrSortFilterProxyModel()
             self.proxyModel.setSourceModel(model)
             self.setModel(self.proxyModel)
@@ -200,18 +198,18 @@ class PhotosListView(QTableView):
         """selection command override"""
         if event is not None:
             if event.type() == event.Type.MouseButtonPress:
-                event: QMouseEvent = event
                 if event.button() == Qt.MouseButton.LeftButton:
                     if self.selectionModel().isSelected(index):
                         return (
                             QItemSelectionModel.SelectionFlag.Current
                             | QItemSelectionModel.SelectionFlag.Rows
                         )
-                    return (
-                        QItemSelectionModel.SelectionFlag.Clear
-                        | QItemSelectionModel.SelectionFlag.SelectCurrent
-                        | QItemSelectionModel.SelectionFlag.Rows
-                    )
+                    if event.modifiers() != Qt.KeyboardModifier.ControlModifier:
+                        return (
+                            QItemSelectionModel.SelectionFlag.Clear
+                            | QItemSelectionModel.SelectionFlag.SelectCurrent
+                            | QItemSelectionModel.SelectionFlag.Rows
+                        )
         return super().selectionCommand(index, event)
 
     def keyPressEvent(self, event: QKeyEvent):

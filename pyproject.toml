@@ -15,7 +15,10 @@ dependencies = [
     "pyqtdarktheme2>=2.1.2",
     "folium>=0.20.0",
     "xmltodict>=1.0.2",
-    "lrtools @ git+https://github.com/fdenivac/Lightroom-SQL-tools",
+    "rawpy>=0.27.0",
+    "pillow>=12.0.0",
+    "pluginlib>=0.11.0",
+    "lrtools>=2026.11.13 @ git+https://github.com/fdenivac/Lightroom-SQL-tools",
 ]
 description = "A Lightroom viewer without Lightroom."
 license = "GPL-3.0-or-later"
@@ -28,10 +31,7 @@ maintainers = [
 ]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
-    "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
@@ -49,7 +49,6 @@ readme = {file = ["README.md"]}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-# exclude = ["obsolete", "build"]
 namespaces = true
 
 
@@ -62,3 +61,7 @@ namespaces = true
 [project.gui-scripts]
 lrviewer = "lrviewer.appLrView:main"
 
+
+[tool.pylint.main]
+load-plugins = ["pylint_qt"]
+extension-pkg-allow-list = ["PySide6"]

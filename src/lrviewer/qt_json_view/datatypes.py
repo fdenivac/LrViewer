@@ -606,12 +606,10 @@ class UrlType(DataType):
         font = QtWidgets.QApplication.instance().font()
         font.setUnderline(True)
         item.setData(font, QtCore.Qt.ItemDataRole.FontRole)
-        style = QtWidgets.QApplication.instance().style()
         icon = (
-            QtWidgets.QApplication.instance().style()
-            # .standardIcon(getattr(QStyle.StandardPixmap, "SP_DriveNetIcon"))
+            QtWidgets.QApplication.instance()
+            .style()
             .standardIcon(QStyle.StandardPixmap.SP_DriveNetIcon)
-            # .standardIcon(QtWidgets.QApplication.instance().style().SP_DriveNetIcon)
         )
         item.setData(icon, QtCore.Qt.ItemDataRole.DecorationRole)
         item.setFlags(item.flags() | QtCore.Qt.ItemFlag.ItemIsEditable)
@@ -649,21 +647,21 @@ class FilepathType(UrlType):
     def value_item(self, value, model, key=None):
         """Create an item for the value column for this data type."""
         item = super(FilepathType, self).value_item(value, model, key)
-        # if os.path.isfile(value):
-        #     icon = (
-        #         QtWidgets.QApplication.instance()
-        #         .style()
-        #         .standardIcon(QtWidgets.QApplication.instance().style().SP_FileIcon)
-        #     )
-        # elif os.path.isdir(value):
-        #     icon = (
-        #         QtWidgets.QApplication.instance()
-        #         .style()
-        #         .standardIcon(QtWidgets.QApplication.instance().style().SP_DirIcon)
-        #     )
-        # else:
-        #     return item
-        # item.setData(icon, QtCore.Qt.ItemDataRole.DecorationRole)
+        if os.path.isfile(value):
+            icon = (
+                QtWidgets.QApplication.instance()
+                .style()
+                .standardIcon(QStyle.StandardPixmap.SP_FileIcon)
+            )
+        elif os.path.isdir(value):
+            icon = (
+                QtWidgets.QApplication.instance()
+                .style()
+                .standardIcon(QStyle.StandardPixmap.SP_DirIcon)
+            )
+        else:
+            return item
+        item.setData(icon, QtCore.Qt.ItemDataRole.DecorationRole)
         return item
 
 

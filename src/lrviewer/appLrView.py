@@ -1,5 +1,5 @@
 # -*- encoding: utf-8 -*-
-# pylint: disable=too-many-lines,line-too-long,invalid-name,attribute-defined-outside-init,wrong-import-position
+# pylint: disable=too-many-lines,invalid-name,attribute-defined-outside-init,wrong-import-position
 
 
 """
@@ -7,12 +7,14 @@
 Lightroom Viewer Application
 
 """
+
 import os
 import sys
 import logging
 import argparse
 import ctypes
 import weakref
+from contextlib import contextmanager
 from enum import StrEnum
 
 from PySide6.QtWidgets import (
@@ -28,8 +30,8 @@ from PySide6.QtWidgets import (
     QMenu,
     QDockWidget,
     QFileDialog,
-    QComboBox,
     QMessageBox,
+    QComboBox,
     QLabel,
 )
 from PySide6.QtGui import (
@@ -50,18 +52,23 @@ import qdarktheme
 
 from lrtools import __version__ as LRTOOLS_VERSION
 
-
 # local imports
 sys.path.append(os.path.realpath(os.path.dirname(__file__)))
 
-from settings import settings, APP_NAME, APP_VERSION
+from settings import settings, APP_NAME, APP_VERSION, settings_base_catalog
+from utils import (
+    get_all_loggers,
+    set_log_level,
+    set_log_filter,
+)
 from modelPhotos import PhotosModel
 from collectionsWidget import CollectionsFilterWidget
 from modelCollections import CollectionsModel, ItemType, TreeItem
 from photosThumbView import PhotosThumbView
 from photosListView import PhotosListView
 from metadatasView import MetadatasView
-from lrApi import PhotoMetadatas, criteria_to_dict, dict_to_criteria, lr_api
+from lrApi import criteria_to_dict, dict_to_criteria, lr_api
+from metadatas import PhotoMetadatas
 from thumbProvider import thumbs_provider
 
 from slideshow.slideshow import SlideShow
@@ -73,7 +80,7 @@ from mapWidget import MapWidget
 from uiDialogs import AboutDialog
 from dlgColumns import ColumnsDialog
 from dlgCriteria import CriteriaDialog
-
+from dlgCatalogManager import CatalogManagerDialog, CatalogSettingsDialog
 
 STATUS_LABEL_COUNT = "Photos count: {0}"
 STATUS_LABEL_SELECTED = "Selected count: {0}"
@@ -86,32 +93,29 @@ ROOT_KEYWORD = "Keywords:/"
 ROOT_SEARCH = "Search:/"
 
 
+@contextmanager
+def wait_cursor():
+    """safe change/restore cursor"""
+    QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+    try:
+        yield
+    finally:
+        QApplication.restoreOverrideCursor()
+
+
 class WHERE_SEARCH(StrEnum):
     """search combo value"""
 
     ANY = "Any"
     FILENAME = "Filename"
-    # FILECOPY = "Copy Filename"
     TITLE = "Title"
     CAPTION = "Caption"
-    # META_ANY = "Any Metadatas"
     META_EXIF = "EXIF"
     META_IPTC = "IPTC"
 
 
-# set logger in stdout
-log = logging.getLogger("lrviewer")
-log.setLevel(logging.INFO)
-handler = logging.StreamHandler(sys.stdout)
-handler.setLevel(logging.INFO)
-handler.setFormatter(
-    logging.Formatter(
-        "%(name)s - %(asctime)s.%(msecs)d - %(levelname)s - %(message)s",
-        datefmt="%H:%M:%S",
-    )
-)
-log.addHandler(handler)
-log.info("Logger in place")
+# create root logger
+log = logging.getLogger()
 
 
 def abspath(filename):
@@ -127,6 +131,7 @@ class App(QMainWindow):
     def __init__(self, args: argparse.Namespace):
         """init main windows"""
         super().__init__()
+        self.args = args
 
         # Application icon
         self.setWindowIcon(QIcon(abspath("./ico/lrviewer48x48.png")))
@@ -149,23 +154,34 @@ class App(QMainWindow):
         lr_api.default_columns = settings.value(
             "defaultColumns", "name,datecapt,speed,aperture,iso"
         )
+        # we need always latitude, longitude for photo location on map
+        lr_api.add_hidden_columns("latitude,longitude")
 
-        if args.lrcat:
-            self.openLrCatalog(args.lrcat, args.columns, args.criteria)
+        if self.args.lrcat:
+            self.openLrCatalog(self.args.lrcat)
         else:
             recent = self.recentCatalog()
             if recent:
-                self.openLrCatalog(recent, args.columns, args.criteria)
+                self.openLrCatalog(recent)
             else:
                 self.show()
                 self.openLrCatalogDlg()
 
-        if args.slideshow:
-            self.slideshow.setInterval(args.timer * 1000)
-            self.toggleSlideshowFullScreen()
-            self.onStartSlideshow()
+        if self.args.query_url:
+            self.addressBar.setText(self.args.query_url)
+            self.onURL()
         else:
-            self.show()
+            # set last URL query if none columns/criteria specified
+            last_query = settings.value("lastQuery")
+            if last_query:
+                self.addressBar.setText(last_query)
+                self.onURL()
+
+        if self.args.slideshow:
+            self.slideshow.setInterval(self.args.timer * 1000)
+            self.onStartSlideshow()
+
+        self.show()
 
     def initUI(self):
         """
@@ -177,8 +193,14 @@ class App(QMainWindow):
             self.log_dock.setObjectName("logs_dock")
             self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.log_dock)
             self.logTextBox = LoggerWidget(self)
+            # set modules filter
+            modules = settings.value("logModules", "")
+            if modules:
+                set_log_filter(self.logTextBox, modules)
+            else:
+                set_log_level(self.logTextBox, settings.value("logLevel", "INFO"))
             logging.getLogger().addHandler(self.logTextBox)
-            logging.getLogger().setLevel(logging.INFO)
+
             self.log_view = self.logTextBox
             self.log_dock.setWidget(self.logTextBox)
             self.restoreDockWidget(self.log_dock)
@@ -191,6 +213,8 @@ class App(QMainWindow):
         statusbar.addPermanentWidget(self.label_photos_count)
         self.label_photos_selected = QLabel(STATUS_LABEL_SELECTED.format(0))
         statusbar.addPermanentWidget(self.label_photos_selected)
+        self.label_thumbs_build = QLabel()
+        statusbar.addPermanentWidget(self.label_thumbs_build)
 
         # create tree for the various collections
         #   (collections are lightroom keywords, collections, smart collections, published collections and lrviewer queries)
@@ -227,7 +251,9 @@ class App(QMainWindow):
         self.slideshow = self.createSlideshowWidget()
         self.slideshow_dock.setWidget(self.slideshow)
         self.restoreDockWidget(self.slideshow_dock)
-        self.stateSlideshowFloating = self.slideshow_dock.isFloating()
+        self.slideshow_dock.setStyleSheet(
+            "background: black; margin: 0; padding: 0; border: none;"
+        )
 
         # Dock geo map
         map_type = settings.value("mapTiles", "OpenStreetMap")
@@ -267,6 +293,8 @@ class App(QMainWindow):
         self.restoreState(settings.value("winMainState", bytes("", "utf-8")))
 
         # restore, maximize last MDI activated
+        self.stateSlideshowFloating = self.slideshow_dock.isFloating()
+        self.stateSlideshowHidden = self.slideshow_dock.isHidden()
         if settings.value("activeMDI", "PhotosList") == "PhotosList":
             self.activatePhotosList(True)
         else:
@@ -309,6 +337,13 @@ class App(QMainWindow):
 
         fileMenu.addSeparator()
 
+        action = QAction("&Manage catalogs ...", self)
+        action.setStatusTip("Manage catalogs : delete, edit settings")
+        action.triggered.connect(self.onManageCatalogs)
+        fileMenu.addAction(action)
+
+        fileMenu.addSeparator()
+
         action = QAction("&Quit", self)
         action.triggered.connect(self.quitApp)
         action.setShortcut("Ctrl+Q")
@@ -346,7 +381,6 @@ class App(QMainWindow):
         action = QAction("Store Current Query ...", self)
         action.setStatusTip("Store current query in collections panel")
         action.triggered.connect(self.collectionsView.onStoreQuery)
-        # action.triggered.connect(self.onStoreQuery)
         queryMenu.addAction(action)
 
         action = QAction("Create Query ...", self)
@@ -606,6 +640,7 @@ class App(QMainWindow):
         self.actionStartSlideshow = QAction(
             "Start slideshow (from first photo)",
             self,
+            shortcut="Ctrl+P",
             statusTip="Start slideshow from first photo",
             triggered=self.onStartSlideshow,
         )
@@ -613,21 +648,13 @@ class App(QMainWindow):
 
         # continue slide show
         self.actionContinueSlideShow = QAction(
-            "Start slideshow from current photo",
+            "Play/Pause slideshow (from current photo)",
             self,
-            statusTip="Continue slideshow of current folder",
-            triggered=self.onContinueSlideshow,
+            shortcut="Ctrl+Space",
+            statusTip="Play slideshow from current photo, or Pause slideshow",
+            triggered=self.onPlayPauseSlideshow,
         )
         slideshowMenu.addAction(self.actionContinueSlideShow)
-
-        # pause slide show
-        self.actionPauseSlideshow = QAction(
-            "Pause slideshow",
-            self,
-            statusTip="Pause slideshow of current folder",
-            triggered=self.onPauseSlideshow,
-        )
-        slideshowMenu.addAction(self.actionPauseSlideshow)
 
         # slide show delay between photos
         subMenu = QMenu("Slideshow speed", self, statusTip="Adjust slideshow speed")
@@ -772,7 +799,10 @@ class App(QMainWindow):
     def createPhotosThumbView(self):
         """create photos thumb view"""
         view = PhotosThumbView(self.photoModel)
+        view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        view.customContextMenuRequested.connect(self.photosContextItemMenu)
         view.selectionModel().currentRowChanged.connect(self.onPhotoRowChanged)
+        view.selectionModel().selectionChanged.connect(self.onSelectionChanged)
         view.doubleClicked.connect(self.onPhotoDoubleClicked)
         view.hide()
         return view
@@ -804,7 +834,6 @@ class App(QMainWindow):
         """update slideshow menu"""
         name = "Exit Fullscreen" if self.slideshow_dock.isFullScreen() else "Fullscreen"
         self.actionSlideshowFullscreen.setText(name)
-        self.actionPauseSlideshow.setEnabled(self.slideshow.isTimerActive())
         delay = self.slideshow.getInterval()
         for action in self.menuSlideshowSpeed.actions():
             action.setChecked(action.data() == delay)
@@ -901,11 +930,11 @@ class App(QMainWindow):
 
     def selectAll(self):
         """select all in main explorer"""
-        self.photosListView.selectAll()
+        self.activeMainWindow().selectAll()
 
     def unselectAll(self):
         """unselect all in main explorer"""
-        self.photosListView.selectionModel().clearSelection()
+        self.activeMainWindow().selectionModel().clearSelection()
 
     def quitApp(self):
         """action quit application"""
@@ -943,11 +972,7 @@ class App(QMainWindow):
         self.saveRecentCatalogs()
 
         if not lr_api.exception:
-            # TODO "lastQuery" to use
-            settings.setValue(
-                "lastQuery",
-                f"Query:/{lr_api.criteria()}?{lr_api.columns(visible_col=True)}",
-            )
+            settings.setValue("lastQuery", self.addressBar.text())
 
         if settings.value("useLogWidget", 1):
             wr = weakref.ref(self.logTextBox)
@@ -1013,6 +1038,7 @@ class App(QMainWindow):
     def showSlideshowView(self, event):
         """show slideshow view"""
         self.slideshow_dock.setHidden(not event)
+        self.stateSlideshowHidden = self.slideshow_dock.isHidden()
         if event:
             # because no photo set when invisible, force display current photo
             self.setphotosViewIndex("current")
@@ -1062,60 +1088,76 @@ class App(QMainWindow):
         Open Lightroom catalog
         """
         log.info("openLrCatalog %s", filename)
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        lr_api.open(filename)
-        if not lr_api.is_connected():
-            self.statusBar().showMessage(
-                f'Failed to open Lightroom catalog "{filename}" : ({lr_api.exception})'
+
+        with wait_cursor():
+            lr_api.open(filename)
+            if not lr_api.is_connected():
+                self.statusBar().showMessage(
+                    f'Failed to open Lightroom catalog "{filename}" : ({lr_api.exception})'
+                )
+                self.removeRecentCatalog(filename)
+                # clear UI
+                self.setWindowTitle("Lightroom Viewer")
+                self.collectionsView.setModel(CollectionsModel())
+                self.photosListView.model().modelReset.emit()
+                self.addressBar.setText("")
+                self.label_photos_count.setText(
+                    STATUS_LABEL_COUNT.format(lr_api.query_count())
+                )
+                return False
+
+            # access to settings for this catalog
+            existing_setting, settings_path = settings_base_catalog(filename)
+            if not existing_setting:
+                dlg = CatalogSettingsDialog(filename, settings_path, allow_cancel=False)
+                dlg.exec()
+
+            # prepare access to thumbnail for this catalog
+            thumbs_provider.open_provider(filename)
+            thumbs_provider.signals.started.connect(
+                self.onCreateThumbStarted, type=Qt.ConnectionType.QueuedConnection
             )
-            # clear UI
-            self.setWindowTitle("Lightroom Viewer")
-            self.collectionsView.setModel(CollectionsModel())
-            self.photosListView.model().modelReset.emit()
-            self.addressBar.setText("")
-            self.label_photos_count.setText(
-                STATUS_LABEL_COUNT.format(lr_api.query_count())
+            thumbs_provider.signals.finished.connect(
+                self.onCreateThumbFinished, type=Qt.ConnectionType.QueuedConnection
             )
-            QApplication.restoreOverrideCursor()
-            return False
+            thumbs_provider.signals.error.connect(
+                self.onCreateThumbError, type=Qt.ConnectionType.QueuedConnection
+            )
 
-        # prepare access to image for this catalog
-        thumbs_provider.open_provider(filename)
-        self.actionThumbsInPhotoList.setEnabled(thumbs_provider.has_thumbs)
-        self.actionThumbsInPhotoList.setChecked(thumbs_provider.has_thumbs)
-        self.btPhotosThumb.setEnabled(thumbs_provider.has_thumbs)
-        self.photosListView.useThumbs(thumbs_provider.has_thumbs)
-        if not thumbs_provider.has_thumbs:
-            self.btPhotosList.setChecked(True)
-            # change view done after lr_api.query for avoid bad lr_id
+            self.actionThumbsInPhotoList.setEnabled(thumbs_provider.has_thumbs)
+            self.actionThumbsInPhotoList.setChecked(thumbs_provider.has_thumbs)
+            self.btPhotosThumb.setEnabled(thumbs_provider.has_thumbs)
+            self.photosListView.useThumbs(thumbs_provider.has_thumbs)
+            if not thumbs_provider.has_thumbs:
+                self.btPhotosList.setChecked(True)
+                # change view done after lr_api.query for avoid bad lr_id
 
-        # clone lr_api connection for access to photo metadatas (access when onPhotoRowChanged)
-        self.photo_metadatas.clone_connection(lr_api)
+            # clone lr_api connection for access to photo metadatas (access when onPhotoRowChanged)
+            self.photo_metadatas.clone_connection(lr_api)
 
-        self.setWindowTitle(f"Lightroom Viewer - {lr_api.lrcat_file}")
-        self.addRecentCatalog(filename)
+            self.setWindowTitle(f"Lightroom Viewer - {lr_api.catalog_path()}")
+            self.addRecentCatalog(filename)
 
-        model = CollectionsModel()
-        self.collectionsView.setModel(model)
-        model.populate()
-        self.collectionsView.expand_siblings()
+            model = CollectionsModel()
+            self.collectionsView.setModel(model)
+            model.populate()
+            self.collectionsView.expand_siblings()
 
-        # add last query file to collections tree
-        query_file = settings.value("LastQueryFile", "")
-        if query_file:
-            self.collectionsView.loadQueries(query_file, False)
+            # add last query file to collections tree
+            query_file = settings.value("LastQueryFile", "")
+            if query_file:
+                self.collectionsView.loadQueries(query_file, False)
 
-        lr_api.query(criteria, columns)
-        if not thumbs_provider.has_thumbs:
-            # time for change view
-            self.changeView("list")
-            self.mdiPhotosThumb.setHidden(True)
-        self.updateAfterQuery()
+            lr_api.query(criteria, columns)
+            if not thumbs_provider.has_thumbs:
+                # time for change view
+                self.changeView("list")
+                self.mdiPhotosThumb.setHidden(True)
+            self.updateAfterQuery()
 
-        url = f"{ROOT_QUERY}{lr_api.criteria()}?{lr_api.columns()}"
-        self.addressBar.setText(url)
-        QApplication.restoreOverrideCursor()
-        return True
+            url = f"{ROOT_QUERY}{lr_api.criteria()}?{lr_api.columns()}"
+            self.addressBar.setText(url)
+            return True
 
     def openLrCatalogDlg(self):
         """
@@ -1150,9 +1192,6 @@ class App(QMainWindow):
     def addRecentCatalog(self, filename):
         """
         add new catalog to menu
-
-        # TODO bug when self.recentFiles is empty (!?) : no visible
-
         """
         # remove filename from menu if exists (for move)
         for action in self.recentCatalogsMenu.actions():
@@ -1170,6 +1209,15 @@ class App(QMainWindow):
         ):
             action = self.recentCatalogsMenu.actions()[-1]
             self.recentCatalogsMenu.removeAction(action)
+
+    def removeRecentCatalog(self, filename):
+        """
+        Remove a specific catalog from the recent catalogs list.
+        """
+        for action in self.recentCatalogsMenu.actions():
+            if action.text() == filename:
+                self.recentCatalogsMenu.removeAction(action)
+                return
 
     def restoreRecentCatalogs(self):
         """
@@ -1246,36 +1294,34 @@ class App(QMainWindow):
         ]:
             return
 
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        with wait_cursor():
 
-        if item_type == ItemType.KEYWORD:
-            lr_api.query(f"idkeyword={id_lr}{sort}")
+            if item_type == ItemType.KEYWORD:
+                lr_api.query(f"idkeyword={id_lr}{sort}")
 
-        elif item_type == ItemType.COLLECTION_REGULAR:
-            lr_api.query(f"idcollection={id_lr}{sort}")
+            elif item_type == ItemType.COLLECTION_REGULAR:
+                lr_api.query(f"idcollection={id_lr}{sort}")
 
-        elif item_type == ItemType.COLLECTION_SMART:
-            lr_api.smart_query(
-                id_lr, sort_column if sort_column else lr_api.sort_column()
-            )
+            elif item_type == ItemType.COLLECTION_SMART:
+                lr_api.smart_query(
+                    id_lr, sort_column if sort_column else lr_api.sort_column()
+                )
 
-        elif item_type in [
-            ItemType.PUBLISH_COLLECTION,
-            ItemType.PUBLISH_COLLECTION_BUILTIN,
-        ]:
-            lr_api.query(f"idpubcollection={id_lr}{sort}")
+            elif item_type in [
+                ItemType.PUBLISH_COLLECTION,
+                ItemType.PUBLISH_COLLECTION_BUILTIN,
+            ]:
+                lr_api.query(f"idpubcollection={id_lr}{sort}")
 
-        elif item_type == ItemType.FOLDER:
-            lr_api.query(f"idfolder={id_lr}{sort}")
+            elif item_type == ItemType.FOLDER:
+                lr_api.query(f"idfolder={id_lr}{sort}")
 
-        elif item_type == ItemType.LRTOOLS_QUERY:
-            query, columns = id_lr
-            lr_api.query(query, columns)
+            elif item_type == ItemType.LRTOOLS_QUERY:
+                query, columns = id_lr
+                lr_api.query(query, columns)
 
-        else:
-            assert False
-
-        QApplication.restoreOverrideCursor()
+            else:
+                assert False
 
         if lr_api.exception:
             # reset model before any dialog (update during dialog)
@@ -1316,64 +1362,55 @@ class App(QMainWindow):
         log.info("Search '%s' in '%s", text, where)
         lwhere = where.lower()
 
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        with wait_cursor():
 
-        if lwhere == WHERE_SEARCH.ANY.value.lower():
-            lua = {
-                0: {
-                    "criteria": "all",
-                    "operation": "all",
-                    "value": text,
-                    "value2": "",
-                },
-                "combine": "intersect",
-            }
-            lr_api.query_smart_data(lua)
+            if lwhere == WHERE_SEARCH.ANY.value.lower():
+                lua = {
+                    0: {
+                        "criteria": "all",
+                        "operation": "all",
+                        "value": text,
+                        "value2": "",
+                    },
+                    "combine": "intersect",
+                }
+                lr_api.query_smart_data(lua)
 
-        elif lwhere == WHERE_SEARCH.FILENAME.value.lower():
-            lr_api.query(f"name=%{text}%")
+            elif lwhere == WHERE_SEARCH.FILENAME.value.lower():
+                lr_api.query(f"name=%{text}%")
 
-        # elif lwhere == str(WHERE_SEARCH.FILECOPY):
-        #     lr_api.query(f"name={text}")
+            elif lwhere == WHERE_SEARCH.TITLE.value.lower():
+                lr_api.query(f"title=%{text}%")
 
-        elif lwhere == WHERE_SEARCH.TITLE.value.lower():
-            lr_api.query(f"title=%{text}%")
+            elif lwhere == WHERE_SEARCH.CAPTION.value.lower():
+                lr_api.query(f"caption=%{text}%")
 
-        elif lwhere == WHERE_SEARCH.CAPTION.value.lower():
-            lr_api.query(f"caption=%{text}%")
+            elif lwhere == WHERE_SEARCH.META_EXIF.value.lower():
+                lua = {
+                    0: {
+                        "criteria": "exif",
+                        "operation": "any",
+                        "value": text,
+                        "value2": "",
+                    },
+                    "combine": "intersect",
+                }
+                lr_api.query_smart_data(lua)
 
-        # elif lwhere == WHERE_SEARCH.META_ANY.value.lower():
-        #     log.info("search %s unsupported")
-        #     return
+            elif lwhere == WHERE_SEARCH.META_IPTC.value.lower():
+                lua = {
+                    0: {
+                        "criteria": "iptc",
+                        "operation": "any",
+                        "value": text,
+                        "value2": "",
+                    },
+                    "combine": "intersect",
+                }
+                lr_api.query_smart_data(lua)
 
-        elif lwhere == WHERE_SEARCH.META_EXIF.value.lower():
-            lua = {
-                0: {
-                    "criteria": "exif",
-                    "operation": "any",
-                    "value": text,
-                    "value2": "",
-                },
-                "combine": "intersect",
-            }
-            lr_api.query_smart_data(lua)
-
-        elif lwhere == WHERE_SEARCH.META_IPTC.value.lower():
-            lua = {
-                0: {
-                    "criteria": "iptc",
-                    "operation": "any",
-                    "value": text,
-                    "value2": "",
-                },
-                "combine": "intersect",
-            }
-            lr_api.query_smart_data(lua)
-
-        else:
-            assert False
-
-        QApplication.restoreOverrideCursor()
+            else:
+                assert False
 
         if lr_api.exception:
             # reset model before any dialog (update during dialog)
@@ -1429,6 +1466,8 @@ class App(QMainWindow):
                 self.selectCollection(item, sort_column)
                 return
 
+        self.collectionsView.selectionModel().clearSelection()
+
         if query_url.startswith(ROOT_SEARCH):
             pos = query_url.find("?")
             if pos > 0:
@@ -1456,9 +1495,8 @@ class App(QMainWindow):
             QMessageBox.critical(None, "Error", "Invalid syntax")
             return
         criteria, columns = parts
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        lr_api.query(criteria, columns)
-        QApplication.restoreOverrideCursor()
+        with wait_cursor():
+            lr_api.query(criteria, columns)
         if lr_api.exception:
             QMessageBox.critical(self, "Error", f"Query failed: {lr_api.exception}")
 
@@ -1483,11 +1521,17 @@ class App(QMainWindow):
     def queryAll(self):
         """query all photos and videes"""
         lr_api.query(criteria="")
+        self.addressBar.setText(
+            f"Query:/{lr_api.criteria()}?{lr_api.columns(visible_col=True)}"
+        )
         self.updateAfterQuery()
 
     def queryAllPhotos(self):
         """query all photos and videes"""
         lr_api.query(criteria="videos=0")
+        self.addressBar.setText(
+            f"Query:/{lr_api.criteria()}?{lr_api.columns(visible_col=True)}"
+        )
         self.updateAfterQuery()
 
     ##############################################################
@@ -1551,67 +1595,54 @@ class App(QMainWindow):
 
     def onShowQueryLocations(self):
         """show GPS locations on map for results of current query"""
-        # check GPS columns
-        if not self._check_add_gps_columns():
-            # columns not presents, not added
-            return
         col_lat = lr_api.column_index("latitude")
         col_lon = lr_api.column_index("longitude")
         map_loc = set()
         locations = []
         loc_null = 0
         loc_dup = 0
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        for row in range(0, lr_api.query_count()):
-            # photo_id = lr_api.get_lr_id(row)
-            latitude = lr_api.query_results[row][col_lat]
-            longitude = lr_api.query_results[row][col_lon]
-            if latitude is None or longitude is None:
-                loc_null += 1
-                continue
-            location = (latitude, longitude)
-            if location in map_loc:
-                loc_dup += 1
-                # continue
-            map_loc.add(location)
-            locations.append((row, location))
-        log.info(
-            "display %s locations (unset:%s, duplicated:%s)",
-            len(locations),
-            loc_null,
-            loc_dup,
-        )
-        self.mapWidget.set_locations(locations)
-        QApplication.restoreOverrideCursor()
+        with wait_cursor():
+            for id_row, row in enumerate(lr_api.query_results):
+                latitude = row[col_lat]
+                longitude = row[col_lon]
+                if latitude is None or longitude is None:
+                    loc_null += 1
+                    continue
+                location = (latitude, longitude)
+                if location in map_loc:
+                    loc_dup += 1
+                    # continue
+                map_loc.add(location)
+                locations.append((id_row, location))
+            log.info(
+                "display %s locations (unset:%s, duplicated:%s)",
+                len(locations),
+                loc_null,
+                loc_dup,
+            )
+            self.mapWidget.set_locations(locations)
 
-        # photos rows list
-        rows = [row for row, _ in locations]
-        # clear current selection
-        win = self.activeMainWindow()
-        win.selectionModel().clearSelection()
-        # select all rows
-        selection = QItemSelection()
-        for num, row in enumerate(rows):
-            index = win.model().index(row, 0)
-            selection.append(QItemSelectionRange(index))
-            if num == 0:
-                win.selectionModel().setCurrentIndex(
-                    index, QItemSelectionModel.SelectionFlag.Rows
-                )
-                win.scrollTo(index, QAbstractItemView.ScrollHint.PositionAtCenter)
-        win.selectionModel().select(
-            selection,
-            QItemSelectionModel.SelectionFlag.Select
-            | QItemSelectionModel.SelectionFlag.Rows,
-        )
+            # clear current selection
+            win = self.activeMainWindow()
+            win.selectionModel().clearSelection()
+            # select all rows
+            selection = QItemSelection()
+            for num, (row, _) in enumerate(locations):
+                index = win.model().index(row, 0)
+                selection.append(QItemSelectionRange(index))
+                if num == 0:
+                    win.selectionModel().setCurrentIndex(
+                        index, QItemSelectionModel.SelectionFlag.Rows
+                    )
+                    win.scrollTo(index, QAbstractItemView.ScrollHint.PositionAtCenter)
+            win.selectionModel().select(
+                selection,
+                QItemSelectionModel.SelectionFlag.Select
+                | QItemSelectionModel.SelectionFlag.Rows,
+            )
 
     def onShowSelectedLocations(self):
         """show GPS locations on map for current selection"""
-        # TODO save current selection before _check_add_gps_columns, then restore it
-        # check GPS columns
-        if not self._check_add_gps_columns():
-            # columns not presents, not added
-            return
         map_loc = set()
         locations = []
         loc_null = 0
@@ -1619,35 +1650,32 @@ class App(QMainWindow):
         col_lat = lr_api.column_index("latitude")
         col_lon = lr_api.column_index("longitude")
         win = self.activeMainWindow()
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        for index in win.selectionModel().selection().indexes():
-            row = index.row()
-            latitude = lr_api.query_results[row][col_lat]
-            longitude = lr_api.query_results[row][col_lon]
-            if latitude is None or longitude is None:
-                loc_null += 1
-                continue
-            location = (latitude, longitude)
-            if location in map_loc:
-                loc_dup += 1
-                # continue
-            map_loc.add(location)
-            locations.append((row, location))
-        log.info(
-            "display %s locations (unset:%s, duplicated:%s)",
-            len(locations),
-            loc_null,
-            loc_dup,
-        )
-        self.mapWidget.set_locations(locations)
-        QApplication.restoreOverrideCursor()
+        with wait_cursor():
+            for index in win.selectionModel().selection().indexes():
+                row = index.row()
+                if row >= len(lr_api.query_results):
+                    continue
+                latitude = lr_api.query_results[row][col_lat]
+                longitude = lr_api.query_results[row][col_lon]
+                if latitude is None or longitude is None:
+                    loc_null += 1
+                    continue
+                location = (latitude, longitude)
+                if location in map_loc:
+                    loc_dup += 1
+                    # continue
+                map_loc.add(location)
+                locations.append((row, location))
+            log.info(
+                "display %s locations (unset:%s, duplicated:%s)",
+                len(locations),
+                loc_null,
+                loc_dup,
+            )
+            self.mapWidget.set_locations(locations)
 
     def onSelectedVisiblePhotos(self):
         """select visible photos on map (from map bounds)"""
-        # check GPS columns
-        if not self._check_add_gps_columns():
-            # columns not presents, not added
-            return
         bounds = self.mapWidget.get_map_bounds()
         if bounds is None:
             return
@@ -1663,34 +1691,12 @@ class App(QMainWindow):
         url = f"{ROOT_QUERY}{criteria}?{lr_api.columns(True)}"
         self.addressBar.setText(url)
         self.onURL()
-        print(QGuiApplication.queryKeyboardModifiers())
         # in addition ...
         if (
             QGuiApplication.queryKeyboardModifiers()
             == Qt.KeyboardModifier.ControlModifier
         ):
             self.onShowQueryLocations()
-
-    def _check_add_gps_columns(self) -> bool:
-        """check if query has GPS locations, add columns"""
-        # update avec lrid_from_index
-        col_latitude = lr_api.column_index("latitude")
-        col_longitude = lr_api.column_index("longitude")
-        if col_latitude == -1 or col_longitude == -1:
-            ret = QMessageBox.question(
-                self,
-                "Add location column",
-                "Currrent query has no Latitude, Longitude columns.\n\nAdd it and continue ?",
-            )
-            if ret == QMessageBox.StandardButton.No:
-                return False
-            columns = lr_api.columns()
-            columns += ",latitude,longitude"
-            lr_api.query(columns=columns)
-            self.updateAfterQuery(setSort=False, setFirst=False)
-            col_latitude = lr_api.column_index("latitude")
-            col_longitude = lr_api.column_index("longitude")
-        return True
 
     def onMapMarker(self, rows: list):
         """signal from map
@@ -1726,6 +1732,25 @@ class App(QMainWindow):
     #
     ##############################################################
 
+    def onManageCatalogs(self, _):
+        """open dialog settings"""
+        dialog = CatalogManagerDialog()
+        # connect signal for detect changes in current catalog
+        dialog.catalogSettingsChanged.connect(self.onCatalogSettingsChanged)
+        if not dialog.exec():
+            return
+
+    def onCatalogSettingsChanged(self):
+        """process signal catalogSettingsChanged : settings for current catalog changed"""
+        log.info("Current Catalog settings changed")
+        thumbs_provider.open_provider(lr_api.catalog_path())
+        self.actionThumbsInPhotoList.setEnabled(thumbs_provider.has_thumbs)
+        self.actionThumbsInPhotoList.setChecked(thumbs_provider.has_thumbs)
+        self.btPhotosThumb.setEnabled(thumbs_provider.has_thumbs)
+        self.photosListView.useThumbs(thumbs_provider.has_thumbs)
+        if not thumbs_provider.has_thumbs:
+            self.btPhotosList.setChecked(True)
+
     def photosContextItemMenu(self, _):
         """create context menu for photos view"""
         menu = QMenu()
@@ -1746,7 +1771,8 @@ class App(QMainWindow):
 
     def setphotosViewIndex(self, location):
         """
-        Set photo thumbnail, metadatas, gps location for various views. Location in ["first", "prev", "next", "current"]
+        Set photo thumbnail, metadatas, gps location for various views.
+        Location in ["first", "prev", "next", "current"]
 
         Source index is taken from active MDI window or last MDI window activated
         Real work is done in onPhotoRowChanged, called via rowchanged signal after setCurrent index
@@ -1789,13 +1815,13 @@ class App(QMainWindow):
             )
 
         elif location == "current":
-            # need change row for generate signal TODO
-            self.onPhotoRowChanged(curIndex)
+            # force signals generation
+            win.setCurrentIndex(QModelIndex())
+            win.setCurrentIndex(curIndex)
             return
         else:
             assert False
 
-        # win.setCurrentIndex(index)
         win.selectionModel().setCurrentIndex(
             index,
             QItemSelectionModel.SelectionFlag.SelectCurrent
@@ -1803,61 +1829,56 @@ class App(QMainWindow):
         )
 
     def onSelectionChanged(self, selected: QItemSelection, deselected: QItemSelection):
-        """signal selection changed in photosView"""
+        """signal selection changed in active view"""
         log.info(
             "onSelectionChanged selected:%s, deselect:%s",
             selected.count(),
             deselected.count(),
         )
-        selectedCount = len(
-            [
-                index
-                for index in self.photosListView.selectionModel().selectedIndexes()
-                if index.column() == 0
-            ]
-        )
+        view = self.activeMainWindow()
+        lrid_list = [
+            self.lrid_from_index(index)
+            for index in view.selectionModel().selectedRows()
+        ]
+        self.photo_metadatas.read_metadatas(lrid_list)
+        self.metadatas_view.setMetadatas(self.photo_metadatas)
+        selectedCount = len(lrid_list)
         self.label_photos_selected.setText(STATUS_LABEL_SELECTED.format(selectedCount))
 
     def onPhotoRowChanged(self, index: QModelIndex):
-        """selection changed in main explorer"""
+        """selection changed in active view"""
         if not index.isValid():
             self.thumbnailWidget.setImage(None)
             self.slideshow.setPhoto(None)
             self.metadatas_view.setMetadatas(None)
             self.mapWidget.hide_current_location()
             return
-        log.info("onPhotoRowChanged: %s", index.row())
+        row = index.row()
+        log.info("onPhotoRowChanged: %s", row)
         lr_id = self.lrid_from_index(index)
-        # get metadatas
-        self.photo_metadatas.readMetadatas(lr_id)
 
         # get thumb and image
-        thumb = thumbs_provider.get_thumb(lr_id)
+        thumb = thumbs_provider.get_thumb(lr_id, source=index)
         self.thumbnailWidget.setImage(thumb)
         if self.slideshow.isVisible():
             # Warning : slideshow optimization : image not set when invisible
-            photo = thumbs_provider.get_thumb(lr_id, "max")
+            photo = thumbs_provider.get_thumb(lr_id, "max", source=index)
             self.slideshow.setPhoto(photo)
-
-        self.metadatas_view.setMetadatas(self.photo_metadatas)
+        # photo location
         self.mapWidget.set_location(
-            self.photo_metadatas.gps_location(),
-            index.row(),
+            (
+                lr_api.query_results[row][lr_api.column_index("latitude")],
+                lr_api.query_results[row][lr_api.column_index("longitude")],
+            ),
+            row,
             self.actionMapFlyto.isChecked(),
         )
 
     def onPhotoDoubleClicked(self, index: QModelIndex):
         """doubleclick in photoview : active slideshow in fullscreen, display photo"""
-        self.slideshow_dock.setHidden(False)
-        self.stateSlideshowFloating = self.slideshow_dock.isFloating()
-        if not self.stateSlideshowFloating:
-            log.info("setFloating True")
-            self.slideshow_dock.setFloating(True)
-        log.info("Enter fullscreen")
-        self.slideshow_dock.showFullScreen()
-
+        self.setSlideshowFullScreen(True)
         lr_id = self.lrid_from_index(index)
-        photo = thumbs_provider.get_thumb(lr_id, "max")
+        photo = thumbs_provider.get_thumb(lr_id, "max", source=index)
         self.slideshow.setPhoto(photo)
 
     def onPhotoViewResize2Contents(self):
@@ -1899,6 +1920,28 @@ class App(QMainWindow):
             return
         settings.setValue("defaultColumns", dialog.ui.columns_result.text())
         lr_api.default_columns = dialog.ui.columns_result.text()
+
+    def _count_thread_building(self):
+        """count threads building"""
+        thread_count = thumbs_provider.threadpool.activeThreadCount()
+        build_count = thumbs_provider.count_thumbnails_building()
+        text = ""
+        if thread_count > 0 or build_count > 0:
+            text = f"Building {thread_count} thumbnail on {build_count}"
+        self.label_thumbs_build.setText(text)
+
+    def onCreateThumbStarted(self, index, lrid):
+        """signal start thread create thumb"""
+        self._count_thread_building()
+
+    def onCreateThumbFinished(self, index, lrid):
+        """signal thread create thumb finished"""
+        self.photoModel.thumbChanged(index)
+        self._count_thread_building()
+
+    def onCreateThumbError(self, error):
+        """signal thread create thumb finished"""
+        log.info("onCreateThumbError : %s", error)
 
     ##############################################################
     #
@@ -1979,12 +2022,15 @@ class App(QMainWindow):
     def createSlideshowWidget(self):
         """create slideshow window"""
         slideshow = SlideShow()
-        slideshow.setTimerEnabled(False)
+        slideshow.startSlideshow(False)
         slideshow.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         slideshow.customContextMenuRequested.connect(self.slideshowContextItemMenu)
         slideshow.previous.connect(self.onPrevSlide)
         slideshow.next.connect(self.onNextSlide)
+        slideshow.play.connect(self.onContinueSlideshow)
+        slideshow.pause.connect(self.onPauseSlideshow)
         slideshow.doubleClicked.connect(self.toggleSlideshowFullScreen)
+        slideshow.exitFullscreen.connect(lambda: self.setSlideshowFullScreen(False))
         slideshow.setInterval(settings.value("slideShowDelay", 5000))
         return slideshow
 
@@ -1994,53 +2040,72 @@ class App(QMainWindow):
         menu = QMenu()
         menu.addAction(self.actionStartSlideshow)
         menu.addAction(self.actionContinueSlideShow)
-        menu.addAction(self.actionPauseSlideshow)
+        # menu.addAction(self.actionPauseSlideshow)
         menu.addSeparator()
         menu.addAction(self.actionSlideshowFullscreen)
         action = QAction("Hide Slideshow", self)
         action.triggered.connect(lambda close: self.slideshow_dock.hide())
-        menu.addAction(action)
-        action = QAction("Dock Slideshow", self)
-        action.triggered.connect(lambda dock: self.slideshow_dock.setFloating(False))
+        action.setEnabled(not self.slideshow.isSlideshowActive())
         menu.addAction(action)
         menu.exec(QCursor.pos())
 
+    def setSlideshowFullScreen(self, fullscreen: bool):
+        """set slideshow fullscreen mode"""
+        if fullscreen:
+            if self.slideshow_dock.isFullScreen():
+                if self.slideshow_dock.isHidden():
+                    self.slideshow_dock.setHidden(False)
+                return
+            log.info("Enter fullscreen")
+            # save slideshow_dock state before fullscreen
+            self.stateSlideshowHidden = self.slideshow_dock.isHidden()
+            self.stateSlideshowFloating = self.slideshow_dock.isFloating()
+
+            if self.slideshow_dock.isHidden():
+                self.slideshow_dock.setHidden(False)
+            if not self.slideshow_dock.isFloating():
+                self.slideshow_dock.setFloating(True)
+            self.slideshow_dock.showFullScreen()
+        else:
+            if not self.slideshow_dock.isFullScreen():
+                return
+            log.info("exit from fullscreen")
+            # restore slideshow_dock state as before fullscreen
+            self.slideshow_dock.showNormal()
+            if self.stateSlideshowHidden != self.slideshow_dock.isHidden():
+                self.slideshow_dock.setHidden(self.stateSlideshowHidden)
+                log.warning(f"slideshow_dock.setHidden({self.stateSlideshowHidden})")
+            if self.stateSlideshowFloating != self.slideshow_dock.isFloating():
+                self.slideshow_dock.setFloating(self.stateSlideshowFloating)
+
     def toggleSlideshowFullScreen(self):
         """slideshow widget in fullscreen"""
-        if self.slideshow_dock.isFullScreen():
-            log.info("exit from fullscreen")
-            self.show()
-            self.slideshow_dock.showNormal()
-            if not self.stateSlideshowFloating:
-                log.info("setFloating False")
-                self.slideshow_dock.setFloating(False)
-        else:
-            self.stateSlideshowFloating = self.slideshow_dock.isFloating()
-            if not self.stateSlideshowFloating:
-                log.info("setFloating True")
-                self.slideshow_dock.setFloating(True)
-            log.info("Enter fullscreen")
-            if not self.slideshow_dock.isVisible():
-                self.showSlideshowView(True)
-            self.slideshow_dock.showFullScreen()
+        self.setSlideshowFullScreen(not self.slideshow_dock.isFullScreen())
 
     def onStartSlideshow(self):
         """ "Start slideshow from first photo"""
-        self.updateToolbar()
-        self.setphotosViewIndex("first")
-        self.showSlideshowView(True)
-        self.slideshow.setTimerEnabled(True)
+        self._startSlideshow("first")
 
     def onContinueSlideshow(self):
         """ "Start or continue slideshow from current photo"""
+        self._startSlideshow("current")
+
+    def _startSlideshow(self, startFrom):
+        """Start or continue slideshow from current photo"""
         self.updateToolbar()
-        self.setphotosViewIndex("current")
-        self.showSlideshowView(True)
-        self.slideshow.setTimerEnabled(True)
+        self.setphotosViewIndex(startFrom)
+        if self.slideshow_dock.isHidden():
+            # start in fullscreen if slideshow not visible
+            self.setSlideshowFullScreen(True)
+        self.slideshow.startSlideshow(True)
+
+    def onPlayPauseSlideshow(self):
+        """Stop or pause slideshow of current folder"""
+        self.slideshow.startSlideshow(not self.slideshow.isSlideshowActive())
 
     def onPauseSlideshow(self):
-        """Stop r pause slideshow of current folder"""
-        self.slideshow.setTimerEnabled(False)
+        """Stop or pause slideshow of current folder"""
+        self.slideshow.startSlideshow(False)
 
     def onPrevSlide(self):
         """click button prev in slideshow"""
@@ -2081,6 +2146,7 @@ class App(QMainWindow):
             self.lastSubWindowActived = win
         else:
             if self.lastSubWindowActived is None:
+                log.error("None active window")
                 return None
             win = self.lastSubWindowActived
         return win
@@ -2096,17 +2162,12 @@ def main():
         description="View Photos from Lightroom catalog",
         formatter_class=argparse.RawTextHelpFormatter,
     )
-    parser.add_argument("columns", help="Initial columns to display", nargs="?")
     parser.add_argument(
-        "criteria",
-        help='Initial criteria (for syntax: see project "Lightroom-SQL-tools" on github)',
-        nargs="?",
+        "--query-url",
+        help="Initial Query URL (the address bar syntax: <COLLECTIONTYPE>:/<CRITERIA>?<COLUMNS>",
     )
-    default_lrcat = (
-        settings.value("recentFiles", [])[-1]
-        if settings.value("recentFiles", [])
-        else lr_api.lrconfig.default_lrcat
-    )
+    recent_files = settings.value("recentFiles", [])
+    default_lrcat = recent_files[-1] if recent_files else lr_api.lrconfig.default_lrcat
     parser.add_argument(
         "-b",
         "--lrcat",
@@ -2133,6 +2194,17 @@ def main():
     parser.add_argument(
         "-V", "--version", action="store_true", help="Show version and exit"
     )
+    loggers = get_all_loggers(os.path.abspath(__file__))
+    parser.add_argument(
+        "--log-modules",
+        help=f"Specify the modules logged (comma-separated list). Can be {','.join(loggers)}",
+    )
+    parser.add_argument(
+        "--log-level",
+        # type=int,
+        default=logging.INFO,
+        help="Set the logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)",
+    )
 
     args = parser.parse_args()
 
@@ -2140,6 +2212,24 @@ def main():
         print(f"{APP_NAME} - Version {APP_VERSION}")
         print(f"using lrtools version : {LRTOOLS_VERSION}")
         sys.exit()
+
+    # set root logger level
+    logging.getLogger().setLevel(logging.DEBUG)
+    handler = logging.StreamHandler(sys.stdout)
+    # set_log_level(handler, args.log_level)
+    handler.setFormatter(
+        logging.Formatter(
+            "%(name)s - %(asctime)s.%(msecs)d - %(levelname)s - %(message)s",
+            datefmt="%H:%M:%S",
+        )
+    )
+    if args.log_modules:
+        set_log_filter(handler, args.log_modules)
+    else:
+        set_log_level(handler, args.log_level)
+
+    log.addHandler(handler)
+    log.info("Logger in place")
 
     app = QApplication(sys.argv)
     # Apply theme

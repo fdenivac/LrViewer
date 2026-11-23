@@ -230,6 +230,13 @@
                             "criteria": "sort=-2,videos=0,datecapt=>2019-01-01,datecapt=<=2019-12-31",
                             "columns": "name,datecapt,iso,focal,aperture,speed,rating,camera,lens",
                             "children": []
+                        },
+                        {
+                            "name": "Photos 2020",
+                            "type": 6,
+                            "criteria": "sort=-2,videos=0,datecapt=>2020-01-01,datecapt=<=2020-12-31",
+                            "columns": "name,datecapt,iso,focal,aperture,speed,rating,camera,lens",
+                            "children": []
                         }
                     ]
                 },
@@ -305,6 +312,13 @@
                             "name": "5 Stars",
                             "type": 6,
                             "criteria": "sort=2,videos=0,rating==5",
+                            "columns": "id,name,datecapt,iso,focal,aperture,speed,rating,camera,lens",
+                            "children": []
+                        },
+                        {
+                            "name": "Has one or more Stars",
+                            "type": 6,
+                            "criteria": "sort=2,videos=0,rating=>0",
                             "columns": "id,name,datecapt,iso,focal,aperture,speed,rating,camera,lens",
                             "children": []
                         }
@@ -398,7 +412,14 @@
             "data": null,
             "children": [
                 {
-                    "name": "Photo at top of each stack",
+                    "name": "Photos without stack + top of stacks",
+                    "type": 6,
+                    "criteria": "sort=datecapt,stacks=no+top",
+                    "columns": "name=full,datecapt",
+                    "children": []
+                },
+                {
+                    "name": "Photos at top of each stack",
                     "type": 6,
                     "criteria": "sort=datecapt,stacks=top",
                     "columns": "name=full,datecapt",
@@ -409,6 +430,55 @@
                     "type": 6,
                     "criteria": "sort=datecapt,stacks=all",
                     "columns": "name=full,datecapt",
+                    "children": []
+                }
+            ]
+        },
+        {
+            "name": "Rating",
+            "type": 7,
+            "data": null,
+            "children": [
+                {
+                    "name": "Rating = 1",
+                    "type": 6,
+                    "criteria": "rating=1",
+                    "columns": "name,datecapt,speed,aperture,iso,keywords,collections,latitude,longitude",
+                    "children": []
+                },
+                {
+                    "name": "Rating = 2",
+                    "type": 6,
+                    "criteria": "rating=2",
+                    "columns": "name,datecapt,speed,aperture,iso,keywords,collections,latitude,longitude",
+                    "children": []
+                },
+                {
+                    "name": "Rating = 3",
+                    "type": 6,
+                    "criteria": "rating=3",
+                    "columns": "name,datecapt,speed,aperture,iso,keywords,collections,latitude,longitude",
+                    "children": []
+                },
+                {
+                    "name": "Rating = 4",
+                    "type": 6,
+                    "criteria": "rating=4",
+                    "columns": "name,datecapt,speed,aperture,iso,keywords,collections,latitude,longitude",
+                    "children": []
+                },
+                {
+                    "name": "Rating = 5",
+                    "type": 6,
+                    "criteria": "rating=5",
+                    "columns": "name,datecapt,speed,aperture,iso,keywords,collections,latitude,longitude",
+                    "children": []
+                },
+                {
+                    "name": "Has rating (rating > 0)",
+                    "type": 6,
+                    "criteria": "rating=>0",
+                    "columns": "name,datecapt,speed,aperture,iso,keywords,collections,latitude,longitude",
                     "children": []
                 }
             ]

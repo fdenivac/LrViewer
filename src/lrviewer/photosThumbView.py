@@ -6,6 +6,7 @@
 Photo Thumbs View
 
 """
+
 import logging
 
 from PySide6.QtWidgets import (
@@ -23,18 +24,15 @@ from PySide6.QtGui import (
     QKeyEvent,
 )
 
+from settings import settings
 from modelPhotos import (
     PhotosModel,
-    ThumbDelegate,
     LrSortFilterProxyModel,
 )
-
+from delegateThumb import ThumbDelegate
 
 # logger
 log = logging.getLogger(__name__)
-
-# use sort and filter model
-USE_SORT_LIST_MODEL = False
 
 
 class PhotosThumbView(QListView):
@@ -45,7 +43,7 @@ class PhotosThumbView(QListView):
     def __init__(self, model: PhotosModel):
         super().__init__()
 
-        if USE_SORT_LIST_MODEL:
+        if settings.value("useSortListModel", False):
             self.proxyModel = LrSortFilterProxyModel()
             self.proxyModel.setSourceModel(model)
             self.setModel(self.proxyModel)
@@ -131,5 +129,4 @@ class PhotosThumbView(QListView):
         view_width = self.viewport().width()
         grid_width = self.gridSize().width()
         icons = view_width // grid_width
-        print(icons)
         return icons

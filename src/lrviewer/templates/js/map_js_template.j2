@@ -1,0 +1,56 @@
+{# Jinja2 Template for Map JavaScript Functions #}
+
+    function onMarkerClick(e) {
+        var marker = e.target;
+        console.log("typeof", typeof(e.target));
+        var data = JSON.stringify(marker.options.idphoto);
+        console.log("idphoto:", data);
+    }
+
+    function setClusterMarkers(datas) {
+        datas.forEach(elt => {
+            L.marker(elt[0], {"idphoto": elt[1]}).addTo({{ cluster.get_name() }}).on('click', onMarkerClick);
+        });
+        console.log("setClusterMarkers done");
+    }
+
+    function hideCurrentLayer() {
+        if ({{ map.get_name() }}.hasLayer({{ currentGroup.get_name() }})) {
+            {{ map.get_name() }}.removeLayer({{ currentGroup.get_name() }});
+        }
+    }
+
+    function showCurrentLayer() {
+        if ({{ map.get_name() }}.hasLayer({{ currentGroup.get_name() }})) {
+            return;
+        } else {
+            {{ currentGroup.get_name() }}.addTo({{ map.get_name() }});
+        }
+    }
+
+    function toggleClusterLayer() {
+        if ({{ map.get_name() }}.hasLayer({{ cluster.get_name() }})) {
+            console.log("cluster layer active: remove it");
+            {{ map.get_name() }}.removeLayer({{ cluster.get_name() }});
+        } else {
+            console.log("no cluster layer: add it");
+            {{ cluster.get_name() }}.addTo({{ map.get_name() }});
+        }
+    }
+
+    function getMapBounds() {
+        var bounds = {{ map.get_name() }}.getBounds();
+        var data = JSON.stringify(bounds);
+        console.log("mapbounds:", data);
+    }
+
+    {{ map.get_name() }}.on("click",
+        function (e) {
+            var data = JSON.stringify(e.latlng);
+            console.log("location:", data);
+        }
+    );
+
+    {{ map.get_name() }}.on("zoomend", function (e) {
+        console.log("zoom:", e.target._zoom);
+    });
