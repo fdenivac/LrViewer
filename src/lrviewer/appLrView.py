@@ -48,8 +48,6 @@ from PySide6.QtCore import (
     QItemSelectionRange,
 )
 
-import qdarktheme
-
 from lrtools import __version__ as LRTOOLS_VERSION
 
 # local imports
@@ -2184,13 +2182,25 @@ def main():
         default=5,
         help="Seconds between slide (used with --slideshow option)",
     )
+
+    # qdarktheme is optionnal (not exists for python>=3.12)
+    choices = ["light", "dark", "none"]
+    dark = "dark"
+    try:
+        import qdarktheme
+
+        choices.insert(0, "qdark")
+        dark = "qdark"
+    except ImportError:
+        qdarktheme = None
     parser.add_argument(
         "-D",
         "--dark-theme",
-        choices=["dark", "light", "qdark", "none"],
-        default="qdark",
+        choices=choices,
+        default=dark,
         help="Theme to use",
     )
+
     parser.add_argument(
         "-V", "--version", action="store_true", help="Show version and exit"
     )

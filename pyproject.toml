@@ -12,13 +12,14 @@ dynamic = ["version", "readme"]
 requires-python = ">=3.12"
 dependencies = [
     "PySide6>=6.10.1",
-    "pyqtdarktheme2>=2.1.2",
     "folium>=0.20.0",
     "xmltodict>=1.0.2",
+    "six>=1.17.0",
     "rawpy>=0.27.0",
+    "ImageIO>=2.38.2",
     "pillow>=12.0.0",
     "pluginlib>=0.11.0",
-    "lrtools>=2026.11.13 @ git+https://github.com/fdenivac/Lightroom-SQL-tools",
+    "lrtools @ git+https://github.com/fdenivac/Lightroom-SQL-tools@v2026.11.13",
 ]
 description = "A Lightroom viewer without Lightroom."
 license = "GPL-3.0-or-later"
@@ -51,6 +52,12 @@ readme = {file = ["README.md"]}
 where = ["src"]
 namespaces = true
 
+[tool.setuptools.package-data]
+lrviewer = [
+    "ico/*.png",
+    "schemas/*.sql",
+    "templates/js/*.j2"
+]
 
 [project.urls]
 "Homepage" = "https://github.com/fdenivac/lrviewer"
@@ -58,7 +65,7 @@ namespaces = true
 "Source" = "https://github.com/fdenivac/lrviewer"
 
 
-[project.gui-scripts]
+[project.scripts]
 lrviewer = "lrviewer.appLrView:main"
 
 

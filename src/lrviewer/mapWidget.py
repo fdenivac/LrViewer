@@ -16,6 +16,7 @@ Folium Map Widget
 #         fix around using a differed call on signal "loadFinished"
 
 
+import os
 import io
 import json
 import logging
@@ -270,7 +271,10 @@ class MapWidget(QtWidgets.QWidget):
         """add custom javascript to html page using Jinja2 template"""
         # Load template from a file
         env = Environment(
-            loader=FileSystemLoader("templates/js"), undefined=StrictUndefined
+            loader=FileSystemLoader(
+                os.path.join(os.path.dirname(__file__), "templates", "js")
+            ),
+            undefined=StrictUndefined,
         )
         template = env.get_template("map_js_template.j2")
 
